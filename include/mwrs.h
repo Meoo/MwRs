@@ -75,6 +75,11 @@ typedef enum _mwrs_ret
    */
   MWRS_E_AGAIN,
 
+  /**
+   * System error.
+   */
+  MWRS_E_SYSTEM,
+
 } mwrs_ret;
 
 
@@ -147,12 +152,12 @@ typedef struct _mwrs_res
 
 
 /**
- * Stat structure.
+ * Status structure.
  */
-typedef struct _mwrs_stat
+typedef struct _mwrs_status
 {
 
-} mwrs_stat;
+} mwrs_status;
 
 
 /**
@@ -224,9 +229,9 @@ mwrs_ret mwrs_watcher_open(mwrs_watcher * watcher, mwrs_open_flags flags, mwrs_r
 mwrs_ret mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_out, mwrs_watcher * watcher_out);
 
 
-mwrs_ret mwrs_stat(const char * id, mwrs_stat * stat_out);
+mwrs_ret mwrs_stat(const char * id, mwrs_status * stat_out);
 
-mwrs_ret mwrs_stat_watch(const char * id, mwrs_stat * stat_out, mwrs_watcher * watcher_out);
+mwrs_ret mwrs_stat_watch(const char * id, mwrs_status * stat_out, mwrs_watcher * watcher_out);
 
 
 /**
@@ -356,7 +361,7 @@ typedef mwrs_ret (*mwrs_sv_callback_stat)(mwrs_sv_client * client, const char * 
 typedef struct _mwrs_sv_callbacks
 {
   mwrs_sv_callback_connect connect;
-  mwrs_sv_callback_connect disconnect;
+  mwrs_sv_callback_disconnect disconnect;
 
   mwrs_sv_callback_open open;
   mwrs_sv_callback_stat stat;
