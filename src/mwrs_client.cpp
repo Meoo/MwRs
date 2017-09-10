@@ -5,3 +5,4 @@
  */
 
 #include <mwrs.h>
+#include "mwrs_messages.hpp"

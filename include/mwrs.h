@@ -355,7 +355,7 @@ typedef mwrs_ret (*mwrs_sv_callback_open)(mwrs_sv_client * client, const char * 
  * `stat_out` is already allocated and initialized, just fill the structure.
  * Only fill it if you return `MWRS_SUCCESS`.
  */
-typedef mwrs_ret (*mwrs_sv_callback_stat)(mwrs_sv_client * client, const char * id, mwrs_stat * stat_out);
+typedef mwrs_ret (*mwrs_sv_callback_stat)(mwrs_sv_client * client, const char * id, mwrs_status * stat_out);
 
 
 typedef struct _mwrs_sv_callbacks
