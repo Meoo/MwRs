@@ -23,7 +23,10 @@ extern "C" {
 enum
 {
   // See sockaddr_un limitations
-  MWRS_SERVER_NAME_MAX = 64
+  MWRS_SERVER_NAME_MAX = 64,
+
+  //
+  MWRS_ID_MAX = 512
 };
 
 

@@ -12,10 +12,12 @@
 #include <algorithm>
 #include <atomic>
 #include <iterator>
+#include <list>
 #include <thread>
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <set>
 
 #ifdef WIN32
 # define VC_EXTRALEAN
@@ -27,11 +29,6 @@
 
 namespace
 {
-
-// Consts
-
-const mwrs_size MWRS_SV_BUFFER_SIZE = 4096;
-
 
 
 // Forward decl
@@ -60,20 +57,13 @@ public:
 class WinClientThread
 {
 public:
-  WinClientThread();
-  ~WinClientThread();
-
-  void interrupt();
-
-  bool try_add_client(HANDLE pipe);
-
-
-private:
   class ClientHandle
   {
   public:
     ClientHandle(WinClientThread * parent, HANDLE pipe);
     ~ClientHandle();
+
+    void queue_message(const mwrs_sv_message * message); // TODO enqueue and raise wake_event
 
     void tick();
     void close();
@@ -94,9 +84,12 @@ private:
     mwrs_client_data * client = nullptr;
 
     HANDLE pipe = INVALID_HANDLE_VALUE;
+    std::mutex mutex;
 
-    char read_buffer[MWRS_SV_BUFFER_SIZE];
-    char write_buffer[MWRS_SV_BUFFER_SIZE];
+    std::set<HANDLE> sent_handles;
+
+    mwrs_cl_message read_message;
+    std::list<mwrs_sv_message> write_queue;
 
     OVERLAPPED read_overlapped;
     OVERLAPPED write_overlapped;
@@ -107,6 +100,15 @@ private:
   // ClientHandle
 
 
+  WinClientThread();
+  ~WinClientThread();
+
+  void interrupt();
+
+  bool try_add_client(HANDLE pipe);
+
+
+private:
   void run();
 
 
@@ -116,6 +118,7 @@ private:
   std::vector<std::unique_ptr<ClientHandle>> clients;
 
   std::thread thread;
+  std::atomic_bool stop_flag {false};
 
   std::mutex mutex;
   std::vector<std::unique_ptr<ClientHandle>> pending_clients;
@@ -139,6 +142,8 @@ private:
   WinEvent wake_event;
 
   std::thread thread;
+  std::atomic_bool stop_flag {false};
+
   std::vector<std::unique_ptr<WinClientThread>> client_threads;
 };
 // WinAcceptThread
@@ -151,7 +156,7 @@ struct mwrs_server_plat
 
 struct mwrs_client_plat
 {
-  HANDLE wake_event = INVALID_HANDLE_VALUE;
+  WinClientThread::ClientHandle * handle = nullptr;
 };
 
 #endif
@@ -184,7 +189,7 @@ mwrs_ret plat_server_start(mwrs_server_data * server);
 
 void plat_server_stop(mwrs_server_data * server);
 
-void plat_client_on_message_queued(mwrs_client_data * client);
+void plat_client_send_message(mwrs_client_data * client, const mwrs_sv_message * message);
 
 
 // Functions
@@ -193,9 +198,7 @@ mwrs_client_data * server_on_client_connect(mwrs_server_data * server, int argc,
 
 void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * client);
 
-void client_send_message(mwrs_client_data * client, mwrs_server_message * message);
-
-void client_on_receive_message(mwrs_client_data * client, mwrs_client_message * message);
+void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message * message);
 
 
 
@@ -218,6 +221,10 @@ WinClientThread::ClientHandle::~ClientHandle()
   // Should be called manually... just in case
   close();
 
+  for (auto handle : sent_handles)
+    CloseHandle(handle);
+  sent_handles.clear();
+
   CancelIo(pipe);
   CloseHandle(pipe);
 }
@@ -233,19 +240,30 @@ void WinClientThread::ClientHandle::close()
 }
 
 
+void WinClientThread::ClientHandle::queue_message(const mwrs_sv_message * message)
+{
+  {
+    std::unique_lock<std::mutex>(mutex);
+    write_queue.push_back(*message);
+  }
+  SetEvent(parent->wake_event);
+}
+
+
 void WinClientThread::ClientHandle::tick()
 {
   for (;;)
   {
     if (!reading)
     {
+      ZeroMemory(&read_message, sizeof(read_message));
       ZeroMemory(&read_overlapped, sizeof(read_overlapped));
       read_overlapped.hEvent = read_event;
 
       DWORD err = ERROR_SUCCESS;
 
       DWORD read_len;
-      if (ReadFile(pipe, read_buffer, MWRS_SV_BUFFER_SIZE, &read_len, &read_overlapped) == 0)
+      if (ReadFile(pipe, &read_message, sizeof(read_message), &read_len, &read_overlapped) == 0)
         err = GetLastError();
 
       if (err == ERROR_IO_PENDING)
@@ -263,9 +281,34 @@ void WinClientThread::ClientHandle::tick()
       }
     }
 
-    if (!writing)
+    if (!writing && !write_queue.empty())
     {
-      // Check message queue
+      ZeroMemory(&write_overlapped, sizeof(write_overlapped));
+      write_overlapped.hEvent = write_event;
+
+      mwrs_sv_message & send_message = write_queue.front();
+
+      DWORD err = ERROR_SUCCESS;
+
+      DWORD write_len;
+      if (WriteFile(pipe, &send_message, sizeof(send_message), &write_len, &write_overlapped) == 0)
+        err = GetLastError();
+
+      if (err == ERROR_IO_PENDING)
+      {
+        writing = true;
+      }
+      else if (err == ERROR_SUCCESS)
+      {
+        // Pop sent message
+        std::unique_lock<std::mutex>(mutex);
+        write_queue.pop_front();
+        continue;
+      }
+      else
+      {
+        // TODO Error
+      }
     }
 
     break;
@@ -306,6 +349,12 @@ void WinClientThread::ClientHandle::write_completed()
     // TODO Error
   }
 
+  {
+    // Pop sent message
+    std::unique_lock<std::mutex>(mutex);
+    write_queue.pop_front();
+  }
+
   writing = false;
   ResetEvent(write_event);
 }
@@ -314,27 +363,87 @@ void WinClientThread::ClientHandle::write_completed()
 
 void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
 {
-  if (client)
+  if (readlen != sizeof(mwrs_cl_message))
   {
-    // TODO receive message
+    // TODO receive error
   }
-  else
-  {
-    // TODO read handshake
 
-    client = server_on_client_connect(parent->server, 0, nullptr);
-    if (client)
+  switch (read_message.type)
+  {
+  case MWRS_MSG_CL_WIN_CONSUME_HANDLE:
     {
-      // Share wake event
-      client->plat.wake_event = parent->wake_event;
+      auto it = sent_handles.find((HANDLE)read_message.win_consume_handle.handle);
+      if (it != sent_handles.end())
+      {
+        sent_handles.erase(it);
+      }
+      else
+      {
+        // TODO error
+      }
+    }
+    break; // MWRS_MSG_CL_WIN_CONSUME_HANDLE
+
+  case MWRS_MSG_CL_WIN_HANDSHAKE:
+    if (!client)
+    {
+      if (read_message.type != MWRS_MSG_CL_WIN_HANDSHAKE)
+      {
+        // TODO error
+      }
+
+      // TODO read handshake
+
+      client = server_on_client_connect(parent->server, 0, nullptr);
+      if (client)
+      {
+        client->plat.handle = this;
+      }
+      else
+      {
+        // TODO error
+      }
     }
     else
     {
       // TODO error
     }
-  }
+    break; // MWRS_MSG_CL_WIN_HANDSHAKE
+
+  default:
+    if (client)
+    {
+      client_on_receive_message(client, &read_message);
+    }
+    else
+    {
+      // TODO error
+    }
+  } // switch message type
 }
 // Client on_read
+
+
+
+WinClientThread::WinClientThread()
+  : thread([this]() { run(); })
+{
+}
+
+WinClientThread::~WinClientThread()
+{
+  interrupt();
+}
+
+void WinClientThread::interrupt()
+{
+  if (thread.joinable())
+  {
+    stop_flag = true;
+    SetEvent(wake_event);
+    thread.join();
+  }
+}
 
 
 bool WinClientThread::try_add_client(HANDLE pipe)
@@ -355,7 +464,7 @@ void WinClientThread::run()
   HANDLE events[MAXIMUM_WAIT_OBJECTS];
   events[0] = wake_event;
 
-  while (true) // TODO not interrupted
+  while (!stop_flag)
   {
     ResetEvent(wake_event);
 
@@ -432,12 +541,25 @@ void WinClientThread::run()
 
 
 
+WinAcceptThread::WinAcceptThread(mwrs_server_data * server)
+  : server(server), thread([this]() { run(); })
+{
+}
+
+WinAcceptThread::~WinAcceptThread()
+{
+  interrupt();
+}
+
 void WinAcceptThread::interrupt()
 {
-  // TODO
-  SetEvent(wake_event);
+  if (thread.joinable())
+  {
+    stop_flag = true;
+    SetEvent(wake_event);
+    thread.join();
+  }
 }
-// AcceptThread interrupt
 
 
 void WinAcceptThread::run()
@@ -452,15 +574,15 @@ void WinAcceptThread::run()
 
   std::vector<std::unique_ptr<WinClientThread>> client_threads;
 
-  for (;;)
+  while (!stop_flag)
   {
     HANDLE pipe = CreateNamedPipe(
       pipename,
       PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
       PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
       PIPE_UNLIMITED_INSTANCES,
-      MWRS_SV_BUFFER_SIZE,
-      MWRS_SV_BUFFER_SIZE,
+      sizeof(mwrs_sv_message),
+      sizeof(mwrs_cl_message),
       0,
       NULL);
 
@@ -514,8 +636,15 @@ void WinAcceptThread::run()
 
       if (!added)
       {
-        client_threads.emplace_back(new WinClientThread);
-        if (!client_threads.back()->try_add_client(pipe))
+        try
+        {
+          client_threads.emplace_back(new WinClientThread);
+          if (!client_threads.back()->try_add_client(pipe))
+          {
+            // TODO error
+          }
+        }
+        catch (const std::exception &)
         {
           // TODO error
         }
@@ -562,11 +691,11 @@ void plat_server_stop(mwrs_server_data * server)
 // plat_server_stop
 
 
-void plat_client_on_message_queued(mwrs_client_data * client)
+void plat_client_send_message(mwrs_client_data * client, const mwrs_sv_message * message)
 {
-  SetEvent(client->plat.wake_event);
+  client->plat.handle->queue_message(message);
 }
-// plat_client_on_message_queued
+// plat_client_send_message
 
 #endif // WIN32
 
