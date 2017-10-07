@@ -83,6 +83,11 @@ typedef enum _mwrs_ret
    */
   MWRS_E_SYSTEM,
 
+  /**
+   * Already initialized.
+   */
+  MWRS_E_ALREADY,
+
 } mwrs_ret;
 
 

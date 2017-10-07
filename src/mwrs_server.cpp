@@ -170,6 +170,10 @@ struct mwrs_server_data
   char name[MWRS_SERVER_NAME_MAX + 1];
   mwrs_sv_callbacks callbacks;
 
+  std::mutex mutex;
+  std::set<std::unique_ptr<mwrs_client_data> > clients;
+  int next_client_id;
+
   mwrs_server_plat plat;
 };
 
@@ -194,9 +198,59 @@ void plat_client_send_message(mwrs_client_data * client, const mwrs_sv_message *
 
 // Functions
 
-mwrs_client_data * server_on_client_connect(mwrs_server_data * server, int argc, char ** argv);
+mwrs_client_data * server_on_client_connect(mwrs_server_data * server, int argc, char ** argv)
+{
+  if (!server)
+    return nullptr; // TODO error code somehow?
 
-void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * client);
+  std::unique_ptr<mwrs_client_data> client(new mwrs_client_data);
+  client->server = server;
+  client->client.userdata = nullptr;
+
+  {
+    std::unique_lock<std::mutex> lock(server->mutex);
+    client->client.id = server->next_client_id++;
+
+    if (server->callbacks.connect)
+    {
+      // TODO args
+      if (server->callbacks.connect(&client->client, 0, nullptr) != MWRS_SUCCESS)
+      {
+        return nullptr; // TODO error code somehow?
+      }
+    }
+
+    server->clients.emplace(std::move(client));
+  }
+}
+
+void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * client)
+{
+  if (!server || !client)
+    return;
+
+  std::unique_lock<std::mutex> lock(server->mutex);
+
+  auto it = std::find_if(server->clients.begin(), server->clients.end(),
+    [client](const auto & v)
+    {
+      return v.get() == client;
+    });
+
+  if (it != server->clients.end())
+  {
+    // TODO unlock & error
+  }
+  else
+  {
+    if (server->callbacks.disconnect)
+      server->callbacks.disconnect(&client->client);
+
+    server->clients.erase(it);
+  }
+}
+
+mwrs_ret server_on_event(mwrs_server_data * server, const char * id, mwrs_event_type type);
 
 void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message * message);
 
@@ -699,5 +753,54 @@ void plat_client_send_message(mwrs_client_data * client, const mwrs_sv_message *
 
 #endif // WIN32
 
+
+
+// Server instance holder
+std::unique_ptr<mwrs_server_data> instance;
+
 }
 // unnamed ns
+
+
+// API implementation
+
+mwrs_ret mwrs_sv_init(const char * server_name, mwrs_sv_callbacks * callbacks)
+{
+  if (::instance)
+    return MWRS_E_ALREADY;
+
+  if (!server_name || !callbacks)
+    return MWRS_E_ARGS;
+
+  ::instance.reset(new mwrs_server_data);
+  std::memset(::instance.get(), 0, sizeof(mwrs_server_data));
+
+  std::strncpy(::instance->name, server_name, MWRS_SERVER_NAME_MAX);
+  ::instance->callbacks = *callbacks;
+
+  ::instance->next_client_id = 1;
+
+  return plat_server_start(::instance.get());
+}
+
+mwrs_ret mwrs_sv_shutdown()
+{
+  if (!::instance)
+    return MWRS_E_UNAVAIL;
+
+  plat_server_stop(::instance.get());
+  ::instance.reset();
+
+  return MWRS_SUCCESS;
+}
+
+mwrs_ret mwrs_sv_push_event(const char * id, mwrs_event_type type)
+{
+  if (!::instance)
+    return MWRS_E_UNAVAIL;
+
+  if (!id)
+    return MWRS_E_ARGS;
+
+  return server_on_event(::instance.get(), id, type);
+}
