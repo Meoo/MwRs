@@ -12,18 +12,59 @@
 
 #include <stdint.h>
 
+#ifdef _WIN32
+# define VC_EXTRALEAN
+# define WIN32_LEAN_AND_MEAN
+# include <windows.h>
+#endif
+
 #pragma pack(push, 1)
+extern "C" {
 
 
 enum mwrs_sv_msg_type
 {
+  MWRS_MSG_SV_COMMON_RESPONSE,
 
+#ifdef _WIN32
+  MWRS_MSG_SV_WIN_HANDSHAKE_ACK,
+#endif
 };
+
+
+struct mwrs_sv_msg_common_response
+{
+  mwrs_ret status;
+
+  union
+  {
+    mwrs_fd fd;
+    mwrs_win_handle_data win_handle;
+  };
+
+  mwrs_watcher_id watcher_id;
+};
+
+#ifdef _WIN32
+struct mwrs_sv_win_handshake_ack
+{
+  mwrs_ret status;
+};
+#endif
 
 
 struct mwrs_sv_message
 {
   mwrs_sv_msg_type type;
+
+  union
+  {
+    mwrs_sv_msg_common_response common_response;
+
+#ifdef _WIN32
+    mwrs_sv_win_handshake_ack win_handshake_ack;
+#endif
+  };
 };
 
 
@@ -37,29 +78,35 @@ enum mwrs_cl_msg_type
   MWRS_MSG_CL_OPEN_WATCH,
   MWRS_MSG_CL_STAT,
   MWRS_MSG_CL_STAT_WATCH,
+
+  MWRS_MSG_CL_WATCHER_OPEN,
   MWRS_MSG_CL_CLOSE_WATCHER,
 
-#ifdef WIN32
+#ifdef _WIN32
   MWRS_MSG_CL_WIN_HANDSHAKE,
-  MWRS_MSG_CL_WIN_CONSUME_HANDLE,
 #endif
 };
 
 
-struct mwrs_cl_msg_common
+struct mwrs_cl_msg_resource_request
 {
-  char id[MWRS_ID_MAX];
+  mwrs_res_id resource_id;
+
   mwrs_open_flags flags; // used for open and open_watch
 };
 
-#ifdef WIN32
-struct mwrs_cl_win_handshake
+struct mwrs_cl_msg_watcher_request
 {
+  mwrs_watcher_id watcher_id;
+
+  mwrs_open_flags flags; // used for open
 };
 
-struct mwrs_cl_win_consume_handle
+#ifdef _WIN32
+struct mwrs_cl_win_handshake
 {
-  uintptr_t handle;
+  int mwrs_version;
+  DWORD process_id;
 };
 #endif
 
@@ -70,16 +117,17 @@ struct mwrs_cl_message
 
   union
   {
-    mwrs_cl_msg_common common;
+    mwrs_cl_msg_resource_request resource_request;
+    mwrs_cl_msg_watcher_request watcher_request;
 
-#ifdef WIN32
+#ifdef _WIN32
     mwrs_cl_win_handshake win_handshake;
-    mwrs_cl_win_consume_handle win_consume_handle;
 #endif
   };
 };
 
 
+} // extern "C"
 #pragma pack(pop)
 
 #endif // MWRS_MESSAGES__HEADER_GUARD

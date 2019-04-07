@@ -22,18 +22,35 @@ extern "C" {
 // Constants
 enum
 {
+  MWRS_VERSION = 1000,
+
   // See sockaddr_un limitations
   MWRS_SERVER_NAME_MAX = 64,
 
-  //
+  // Max length for resource identifier
   MWRS_ID_MAX = 512
 };
+
+
+/**
+ * File descriptor.
+ */
+typedef int mwrs_fd;
 
 
 /**
  * Type for file positions, offsets and buffer sizes.
  */
 typedef long long int mwrs_size;
+
+
+/**
+ * Representation for Windows HANDLE.
+ *
+ * Windows 64 bits apps use 32 bits handles for compatibility
+ * Only use lower bytes (truncated, not sign-extended)
+ */
+typedef unsigned int mwrs_win_handle_data;
 
 
 /**
@@ -54,6 +71,11 @@ typedef enum _mwrs_ret
   MWRS_E_UNAVAIL,
 
   /**
+   * Disconnected from peer.
+   */
+  MWRS_E_BROKEN,
+
+  /**
    * Resource not found.
    */
   MWRS_E_NOTFOUND,
@@ -64,9 +86,19 @@ typedef enum _mwrs_ret
   MWRS_E_NOTREADY,
 
   /**
-   * Access to resource denied (check open flags).
+   * Client version not supported by server.
    */
-  MWRS_E_DENIED,
+  MWRS_E_NOTSUPPORTED,
+
+  /**
+   * Access to resource not permitted (check open flags).
+   */
+  MWRS_E_PERM,
+
+  /**
+   * Operation refused.
+   */
+  MWRS_E_REFUSED,
 
   /**
    * Server-side error.
@@ -82,6 +114,12 @@ typedef enum _mwrs_ret
    * System error.
    */
   MWRS_E_SYSTEM,
+
+  /**
+   * Protocol error.
+   * The connection to the client must be shutdown.
+   */
+  MWRS_E_PROTOCOL,
 
   /**
    * Already initialized.
@@ -150,7 +188,13 @@ typedef enum _mwrs_seek_origin
 
 
 /**
+ * Resource identifier.
+ */
+typedef char mwrs_res_id[MWRS_ID_MAX];
+
+/**
  * Resource handle.
+ * Should be zero initialized before use.
  */
 typedef struct _mwrs_res
 {
@@ -169,10 +213,17 @@ typedef struct _mwrs_status
 
 
 /**
+ * Watcher identifier.
+ */
+typedef int mwrs_watcher_id;
+
+/**
  * Watcher handle.
+ * Should be zero initialized before use.
  */
 typedef struct _mwrs_watcher
 {
+  mwrs_watcher_id id;
 
 } mwrs_watcher;
 
@@ -182,7 +233,7 @@ typedef struct _mwrs_watcher
  */
 typedef struct _mwrs_event
 {
-  mwrs_watcher *  watcher;
+  mwrs_watcher_id watcher_id;
   mwrs_event_type type;
 
 } mwrs_event;
@@ -192,12 +243,12 @@ typedef struct _mwrs_event
 /**
  * Returns 1 if the resource handle is valid, 0 otherwise.
  */
-int mwrs_res_is_valid(mwrs_res * res);
+int mwrs_res_is_valid(const mwrs_res * res);
 
 /**
  * Returns 1 if the watcher handle is valid, 0 otherwise.
  */
-int mwrs_watcher_is_valid(mwrs_watcher * watcher);
+int mwrs_watcher_is_valid(const mwrs_watcher * watcher);
 
 
 /**
@@ -223,7 +274,7 @@ mwrs_ret mwrs_open(const char * id, mwrs_open_flags flags, mwrs_res * res_out);
 /**
  * Open a resource pointed by a valid watcher.
  */
-mwrs_ret mwrs_watcher_open(mwrs_watcher * watcher, mwrs_open_flags flags, mwrs_res * res_out);
+mwrs_ret mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags, mwrs_res * res_out);
 
 /**
  * Simultaneously open a resource and a watcher.
@@ -261,7 +312,7 @@ mwrs_ret mwrs_read(mwrs_res * res, void * buffer, mwrs_size * read_len);
 
 mwrs_ret mwrs_write(mwrs_res * res, const void * buffer, mwrs_size * write_len);
 
-mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size * offset, mwrs_seek_origin origin);
+mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin);
 
 mwrs_ret mwrs_tell(mwrs_res * res, mwrs_size * position_out);
 
@@ -315,9 +366,9 @@ typedef struct _mwrs_sv_res_open
 
   union
   {
-    const char *  path;
-    int           fd;
-    void *        win_handle;
+    const char *         path;
+    int                  fd;
+    mwrs_win_handle_data win_handle;
   };
 
 } mwrs_sv_res_open;
