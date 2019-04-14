@@ -25,6 +25,7 @@
 # define WIN32_LEAN_AND_MEAN
 # include <windows.h>
 # include <tchar.h>
+# include <io.h>
 #endif
 
 
@@ -77,6 +78,8 @@ public:
 
     bool disconnected = false;
 
+    HANDLE process = INVALID_HANDLE_VALUE;
+
 
   private:
     void on_read(mwrs_size readlen);
@@ -86,7 +89,6 @@ public:
 
     mwrs_client_data * client = nullptr;
 
-    HANDLE process = INVALID_HANDLE_VALUE;
     HANDLE pipe = INVALID_HANDLE_VALUE;
     std::mutex mutex;
 
@@ -149,6 +151,9 @@ private:
   //std::vector<std::unique_ptr<WinClientThread>> client_threads;
 };
 // WinAcceptThread
+
+
+mwrs_ret fill_win_handle_from_res_open(const mwrs_client_data * client, const mwrs_sv_res_open * res_open, mwrs_sv_msg_common_response * response_out);
 
 
 struct mwrs_server_plat
@@ -226,6 +231,7 @@ mwrs_ret server_on_client_connect(mwrs_server_data * server, int argc, char ** a
   }
   return MWRS_SUCCESS;
 }
+// server_on_client_connect
 
 void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * client)
 {
@@ -253,10 +259,75 @@ void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * c
     server->clients.erase(it);
   }
 }
+// server_on_client_disconnect
 
-mwrs_ret server_on_event(mwrs_server_data * server, const char * id, mwrs_event_type type) { return MWRS_E_SERVERERR; }
+mwrs_ret server_on_event(mwrs_server_data * server, const char * id, mwrs_event_type type)
+{
+  return MWRS_E_SERVERERR; // TODO
+}
+// server_on_event
 
-void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message * message) {}
+void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message * message)
+{
+  mwrs_sv_message response {};
+  switch (message->type)
+  {
+  case MWRS_MSG_CL_OPEN:
+  case MWRS_MSG_CL_WATCH:
+  case MWRS_MSG_CL_OPEN_WATCH:
+  case MWRS_MSG_CL_STAT:
+  case MWRS_MSG_CL_STAT_WATCH:
+    response.type = MWRS_MSG_SV_COMMON_RESPONSE;
+    // Watch first
+    switch (message->type)
+    {
+    case MWRS_MSG_CL_WATCH:
+    case MWRS_MSG_CL_OPEN_WATCH:
+    case MWRS_MSG_CL_STAT_WATCH:
+      break;
+    default: break;
+    }
+    // Open
+    switch (message->type)
+    {
+    case MWRS_MSG_CL_OPEN:
+    case MWRS_MSG_CL_OPEN_WATCH:
+      {
+        mwrs_sv_res_open res_open {};
+        response.common_response.status = client->server->callbacks.open(&client->client,
+          message->resource_request.resource_id, message->resource_request.flags, &res_open);
+
+        if (response.common_response.status == MWRS_SUCCESS)
+        {
+          response.common_response.open_flags = message->resource_request.flags;
+          response.common_response.status = fill_win_handle_from_res_open(client, &res_open, &response.common_response);
+        }
+      }
+    default: break;
+    }
+    // Stat
+    switch (message->type)
+    {
+    case MWRS_MSG_CL_STAT:
+    case MWRS_MSG_CL_STAT_WATCH:
+      break;
+    default:
+      break;
+    }
+    break;
+
+  case MWRS_MSG_CL_WATCHER_OPEN:
+  case MWRS_MSG_CL_CLOSE_WATCHER:
+    break;
+
+  default:
+    // TODO error
+    assert(0 && "Invalid message type");
+  }
+
+  plat_client_queue_message(client, &response);
+}
+// client_on_receive_message
 
 
 
@@ -801,6 +872,49 @@ void WinAcceptThread::run()
 // WinAcceptThread run
 
 
+mwrs_ret fill_win_handle_from_res_open(const mwrs_client_data* client, const mwrs_sv_res_open* res_open, mwrs_sv_msg_common_response* response_out)
+{
+  HANDLE handle = INVALID_HANDLE_VALUE;
+
+  switch (res_open->type)
+  {
+  case MWRS_SV_PATH:
+    return MWRS_E_SERVERERR; // TODO open
+    break;
+  case MWRS_SV_FD:
+    handle = reinterpret_cast<HANDLE>(_get_osfhandle(res_open->fd));
+    break;
+  case MWRS_SV_WIN_HANDLE:
+    handle = res_open->win_handle;
+    break;
+
+  default:
+    return MWRS_E_SERVERIMPL;
+  }
+
+  HANDLE duplicate = INVALID_HANDLE_VALUE;
+
+  // DUPLICATE_CLOSE_SOURCE is not enough for FDs
+  BOOL ok = DuplicateHandle(GetCurrentProcess(), handle, client->plat.handle->process, &duplicate, 0, TRUE, DUPLICATE_SAME_ACCESS);
+
+  if (res_open->type == MWRS_SV_FD)
+    _close(res_open->fd);
+  else
+    CloseHandle(handle);
+
+  if (!ok)
+  {
+    // TODO error
+    return MWRS_E_SERVERERR;
+  }
+
+  response_out->win_handle = to_mwrs_handle(duplicate);
+
+  return MWRS_SUCCESS;
+}
+// fill_win_handle_from_res_open
+
+
 
 mwrs_ret plat_server_start(mwrs_server_data * server)
 {
@@ -851,7 +965,7 @@ mwrs_ret mwrs_sv_init(const char * server_name, mwrs_sv_callbacks * callbacks)
   if (::instance)
     return MWRS_E_ALREADY;
 
-  if (!server_name || !callbacks)
+  if (!server_name || !callbacks || !callbacks->open || !callbacks->stat)
     return MWRS_E_ARGS;
 
   ::instance.reset(new mwrs_server_data);

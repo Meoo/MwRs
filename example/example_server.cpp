@@ -7,6 +7,9 @@
 #include <csignal>
 #include <thread>
 
+#include <io.h>
+#include <fcntl.h>
+
 
 namespace
 {
@@ -28,8 +31,18 @@ void my_disconnect(mwrs_sv_client * client)
 
 mwrs_ret my_open(mwrs_sv_client * client, const char * id, mwrs_open_flags flags, mwrs_sv_res_open * open_out)
 {
-  printf("Client open\n");
-  return MWRS_E_SERVERERR;
+  int fd = _open(id, _O_RDONLY | _O_BINARY);
+
+  if (fd == -1)
+  {
+    printf("Open error %s\n", strerror(errno));
+    return MWRS_E_NOTFOUND;
+  }
+
+  open_out->type = MWRS_SV_FD;
+  open_out->fd = fd;
+
+  return MWRS_SUCCESS;
 }
 
 mwrs_ret my_stat(mwrs_sv_client * client, const char * id, mwrs_status * stat_out)

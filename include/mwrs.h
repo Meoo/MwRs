@@ -86,6 +86,11 @@ typedef enum _mwrs_ret
   MWRS_E_NOTREADY,
 
   /**
+   * Resource is not in an usable state.
+   */
+  MWRS_E_NOTOPEN,
+
+  /**
    * Client version not supported by server.
    */
   MWRS_E_NOTSUPPORTED,
@@ -104,6 +109,11 @@ typedef enum _mwrs_ret
    * Server-side error.
    */
   MWRS_E_SERVERERR,
+
+  /**
+   * Server implementation error. Check your callbacks.
+   */
+  MWRS_E_SERVERIMPL,
 
   /**
    * No data available right now, try again later.
@@ -173,7 +183,6 @@ typedef enum _mwrs_event_type
 
 typedef enum _mwrs_seek_origin
 {
-
   MWRS_SEEK_SET = 1,
   MWRS_SEEK_CUR,
   MWRS_SEEK_END,
@@ -199,8 +208,18 @@ typedef char mwrs_res_id[MWRS_ID_MAX];
 typedef struct _mwrs_res
 {
   mwrs_open_flags flags;
+  void * opaque;
 
 } mwrs_res;
+
+
+typedef enum _mwrs_res_state
+{
+  MWRS_STATE_NOTFOUND = 1,
+  MWRS_STATE_NOTREADY,
+  MWRS_STATE_READY,
+
+} mwrs_res_state;
 
 
 /**
@@ -208,6 +227,9 @@ typedef struct _mwrs_res
  */
 typedef struct _mwrs_status
 {
+  mwrs_res_state state;
+  mwrs_size size;
+  int mtime;
 
 } mwrs_status;
 
@@ -215,7 +237,7 @@ typedef struct _mwrs_status
 /**
  * Watcher identifier.
  */
-typedef int mwrs_watcher_id;
+typedef long long int mwrs_watcher_id;
 
 /**
  * Watcher handle.
@@ -312,9 +334,7 @@ mwrs_ret mwrs_read(mwrs_res * res, void * buffer, mwrs_size * read_len);
 
 mwrs_ret mwrs_write(mwrs_res * res, const void * buffer, mwrs_size * write_len);
 
-mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin);
-
-mwrs_ret mwrs_tell(mwrs_res * res, mwrs_size * position_out);
+mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin, mwrs_size * position_out);
 
 mwrs_ret mwrs_close(mwrs_res * res);
 
@@ -351,7 +371,6 @@ typedef struct _mwrs_sv_client
 
 typedef enum _mwrs_sv_file_type
 {
-
   MWRS_SV_PATH = 1,
   MWRS_SV_FD,
 
@@ -366,9 +385,9 @@ typedef struct _mwrs_sv_res_open
 
   union
   {
-    const char *         path;
-    int                  fd;
-    mwrs_win_handle_data win_handle;
+    const char * path;
+    int          fd;
+    void *       win_handle;
   };
 
 } mwrs_sv_res_open;
@@ -403,6 +422,7 @@ typedef void (*mwrs_sv_callback_disconnect)(mwrs_sv_client * client);
  *
  * `open_out` is already allocated and initialized, just fill the structure.
  * Only fill it if you return `MWRS_SUCCESS`.
+ * If you give a file descriptor or a Windows handle, you don't have to close it manually.
  */
 typedef mwrs_ret (*mwrs_sv_callback_open)(mwrs_sv_client * client, const char * id, mwrs_open_flags flags, mwrs_sv_res_open * open_out);
 

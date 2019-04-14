@@ -36,12 +36,17 @@ struct mwrs_sv_msg_common_response
 {
   mwrs_ret status;
 
-  union
-  {
-    mwrs_fd fd;
-    mwrs_win_handle_data win_handle;
-  };
+  // Resource
+  mwrs_open_flags open_flags;
+#ifdef _WIN32
+  mwrs_win_handle_data win_handle;
+#else
+  mwrs_fd fd;
+#endif
 
+  // Stat
+
+  // Watcher
   mwrs_watcher_id watcher_id;
 };
 
