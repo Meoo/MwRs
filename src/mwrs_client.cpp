@@ -4,8 +4,8 @@
  * @license BSD 3-Clause
  */
 
-#include <mwrs.h>
 #include "mwrs_messages.hpp"
+#include <mwrs.h>
 
 
 #include <cassert>
@@ -13,10 +13,10 @@
 #include <mutex>
 
 #ifdef _WIN32
-# define VC_EXTRALEAN
-# define WIN32_LEAN_AND_MEAN
-# include <windows.h>
-# include <tchar.h>
+#  define VC_EXTRALEAN
+#  define WIN32_LEAN_AND_MEAN
+#  include <tchar.h>
+#  include <windows.h>
 #endif
 
 
@@ -49,7 +49,6 @@ struct mwrs_data
 };
 
 
-
 // Platform-specific functions
 
 mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, const char ** argv);
@@ -65,7 +64,8 @@ mwrs_ret plat_read(mwrs_res * res, void * buffer, mwrs_size * read_len);
 
 mwrs_ret plat_write(mwrs_res * res, const void * buffer, mwrs_size * write_len);
 
-mwrs_ret plat_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin, mwrs_size * position_out);
+mwrs_ret plat_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin,
+                   mwrs_size * position_out);
 
 mwrs_ret plat_close(mwrs_res * res);
 
@@ -77,7 +77,7 @@ mwrs_ret receive_response(mwrs_data * client, mwrs_sv_message * message)
   return plat_receive_message(client, message); // TODO
 }
 
-mwrs_ret send_res_request(mwrs_data* client, mwrs_cl_msg_type type, const char * res_id,
+mwrs_ret send_res_request(mwrs_data * client, mwrs_cl_msg_type type, const char * res_id,
                           mwrs_open_flags flags = (mwrs_open_flags)0)
 {
   mwrs_cl_message message;
@@ -89,26 +89,27 @@ mwrs_ret send_res_request(mwrs_data* client, mwrs_cl_msg_type type, const char *
 
 mwrs_ret common_response_get_res(const mwrs_sv_msg_common_response * response, mwrs_res * res_out)
 {
-  res_out->flags = response->open_flags;
-  res_out->opaque = (void*)response->win_handle; // TODO platform dependant, fixme
+  res_out->flags  = response->open_flags;
+  res_out->opaque = (void *)response->win_handle; // TODO platform dependant, fixme
   return MWRS_SUCCESS;
 }
 
-mwrs_ret common_response_get_watcher(const mwrs_sv_msg_common_response * response, mwrs_watcher * watcher_out)
+mwrs_ret common_response_get_watcher(const mwrs_sv_msg_common_response * response,
+                                     mwrs_watcher * watcher_out)
 {
   watcher_out->id = response->watcher_id;
   return MWRS_SUCCESS;
 }
 
-mwrs_ret common_response_get_status(const mwrs_sv_msg_common_response * response, mwrs_status * stat_out)
+mwrs_ret common_response_get_status(const mwrs_sv_msg_common_response * response,
+                                    mwrs_status * stat_out)
 {
+  *stat_out = response->stat;
   return MWRS_E_SYSTEM; // TODO
 }
 
 
-
 //
-
 
 
 // Platform-specific implementation
@@ -127,9 +128,8 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
   TCHAR pipename[64 + MWRS_SERVER_NAME_MAX];
   _stprintf_s(pipename, 64 + MWRS_SERVER_NAME_MAX, TEXT("\\\\.\\pipe\\mwrs_%s"), server_name);
 
-  client->plat.pipe = CreateFile(pipename,
-    GENERIC_READ | GENERIC_WRITE,
-    0, NULL, OPEN_EXISTING, 0, NULL);
+  client->plat.pipe =
+      CreateFile(pipename, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 
   if (client->plat.pipe == INVALID_HANDLE_VALUE)
   {
@@ -141,9 +141,8 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
       return MWRS_E_SYSTEM;
 
     // Retry
-    client->plat.pipe = CreateFile(pipename,
-      GENERIC_READ | GENERIC_WRITE,
-      0, NULL, OPEN_EXISTING, 0, NULL);
+    client->plat.pipe =
+        CreateFile(pipename, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 
     if (client->plat.pipe == INVALID_HANDLE_VALUE)
       return MWRS_E_UNAVAIL;
@@ -163,9 +162,9 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
   {
     // Send handshake
     mwrs_cl_message handshake;
-    handshake.type = MWRS_MSG_CL_WIN_HANDSHAKE;
+    handshake.type                       = MWRS_MSG_CL_WIN_HANDSHAKE;
     handshake.win_handshake.mwrs_version = MWRS_VERSION;
-    handshake.win_handshake.process_id = GetCurrentProcessId();
+    handshake.win_handshake.process_id   = GetCurrentProcessId();
 
     mwrs_ret ret = plat_send_message(client, &handshake);
 
@@ -181,9 +180,8 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
     mwrs_sv_message handshake_ack;
     mwrs_ret ret = plat_receive_message(client, &handshake_ack);
 
-    if (ret != MWRS_SUCCESS
-      || handshake_ack.type != MWRS_MSG_SV_WIN_HANDSHAKE_ACK
-      || handshake_ack.win_handshake_ack.status != MWRS_SUCCESS)
+    if (ret != MWRS_SUCCESS || handshake_ack.type != MWRS_MSG_SV_WIN_HANDSHAKE_ACK ||
+        handshake_ack.win_handshake_ack.status != MWRS_SUCCESS)
     {
       CloseHandle(client->plat.pipe); // TODO in destructor instead
 
@@ -212,7 +210,7 @@ mwrs_ret plat_send_message(mwrs_data * client, const mwrs_cl_message * message)
     return MWRS_E_BROKEN;
 
   DWORD written;
-  if (!WriteFile(client->plat.pipe,(const void *) message, sizeof(mwrs_cl_message), &written, NULL))
+  if (!WriteFile(client->plat.pipe, (const void *)message, sizeof(mwrs_cl_message), &written, NULL))
   {
     if (GetLastError() == ERROR_BROKEN_PIPE)
     {
@@ -266,8 +264,8 @@ mwrs_ret plat_receive_message(mwrs_data * client, mwrs_sv_message * message)
 
 mwrs_ret plat_read(mwrs_res * res, void * buffer, mwrs_size * read_len)
 {
-  DWORD read_len_out {};
-  BOOL ok = ReadFile((HANDLE)res->opaque, buffer, (DWORD)*read_len, &read_len_out, NULL);
+  DWORD read_len_out{};
+  BOOL ok   = ReadFile((HANDLE)res->opaque, buffer, (DWORD)*read_len, &read_len_out, NULL);
   *read_len = read_len_out;
 
   if (ok)
@@ -278,8 +276,8 @@ mwrs_ret plat_read(mwrs_res * res, void * buffer, mwrs_size * read_len)
 
 mwrs_ret plat_write(mwrs_res * res, const void * buffer, mwrs_size * write_len)
 {
-  DWORD write_len_out {};
-  BOOL ok = WriteFile((HANDLE)res->opaque, buffer, (DWORD)*write_len, &write_len_out, NULL);
+  DWORD write_len_out{};
+  BOOL ok    = WriteFile((HANDLE)res->opaque, buffer, (DWORD)*write_len, &write_len_out, NULL);
   *write_len = write_len_out;
 
   if (ok)
@@ -288,11 +286,12 @@ mwrs_ret plat_write(mwrs_res * res, const void * buffer, mwrs_size * write_len)
   return MWRS_E_SYSTEM;
 }
 
-mwrs_ret plat_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin, mwrs_size * position_out)
+mwrs_ret plat_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin,
+                   mwrs_size * position_out)
 {
-  LARGE_INTEGER offset_li {};
-  LARGE_INTEGER position_out_li {};
-  DWORD method {};
+  LARGE_INTEGER offset_li{};
+  LARGE_INTEGER position_out_li{};
+  DWORD method{};
 
   switch (origin)
   {
@@ -302,8 +301,8 @@ mwrs_ret plat_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin, mw
   }
 
   offset_li.QuadPart = offset;
-  BOOL ok = SetFilePointerEx((HANDLE)res->opaque, offset_li, &position_out_li, method);
-  *position_out = position_out_li.QuadPart;
+  BOOL ok            = SetFilePointerEx((HANDLE)res->opaque, offset_li, &position_out_li, method);
+  *position_out      = position_out_li.QuadPart;
 
   if (ok)
     return MWRS_SUCCESS;
@@ -316,7 +315,7 @@ mwrs_ret plat_close(mwrs_res * res)
   if (!CloseHandle((HANDLE)res->opaque))
     return MWRS_E_SYSTEM;
 
-  res->flags = (mwrs_open_flags)0;
+  res->flags  = (mwrs_open_flags)0;
   res->opaque = nullptr;
   return MWRS_SUCCESS;
 }
@@ -324,13 +323,11 @@ mwrs_ret plat_close(mwrs_res * res)
 #endif // _WIN32
 
 
-
 // Instance holder
 std::unique_ptr<mwrs_data> instance;
 
 
-}
-// unnamed ns
+} // namespace
 
 
 // API implementation
@@ -411,9 +408,10 @@ mwrs_ret mwrs_open(const char * id, mwrs_open_flags flags, mwrs_res * res_out)
   return response.common_response.status;
 }
 
-mwrs_ret mwrs_watcher_open(const mwrs_watcher* watcher, mwrs_open_flags flags, mwrs_res* res_out);
+mwrs_ret mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags, mwrs_res * res_out);
 
-mwrs_ret mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_out, mwrs_watcher * watcher_out)
+mwrs_ret mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_out,
+                         mwrs_watcher * watcher_out)
 {
   if (!::instance)
     return MWRS_E_UNAVAIL;
@@ -561,7 +559,7 @@ mwrs_ret mwrs_watch(const char * id, mwrs_watcher * watcher_out)
   return response.common_response.status;
 }
 
-mwrs_ret mwrs_close_watcher(mwrs_watcher* watcher);
+mwrs_ret mwrs_close_watcher(mwrs_watcher * watcher);
 
 
 mwrs_ret mwrs_read(mwrs_res * res, void * buffer, mwrs_size * read_len)
@@ -586,7 +584,8 @@ mwrs_ret mwrs_write(mwrs_res * res, const void * buffer, mwrs_size * write_len)
   return plat_write(res, buffer, write_len);
 }
 
-mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin, mwrs_size * position_out)
+mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin,
+                   mwrs_size * position_out)
 {
   if (!mwrs_res_is_valid(res))
     return MWRS_E_NOTOPEN;
@@ -606,6 +605,6 @@ mwrs_ret mwrs_close(mwrs_res * res)
 }
 
 
-//mwrs_ret mwrs_poll_event(mwrs_event * event_out);
+// mwrs_ret mwrs_poll_event(mwrs_event * event_out);
 
-//mwrs_ret mwrs_wait_event(mwrs_event * event_out);
+// mwrs_ret mwrs_wait_event(mwrs_event * event_out);

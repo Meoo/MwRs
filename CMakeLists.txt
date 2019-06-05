@@ -8,6 +8,12 @@ set(MWRS_BUILD_EXAMPLE OFF CACHE BOOL "Build MwRs example")
 set(MWRS_INSTALL OFF CACHE BOOL "Create MwRs install target")
 
 
+# Default install directory is <project>/install
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/install" CACHE PATH "..." FORCE)
+endif()
+
+
 if(MSVC)
   # Force to always compile with W4
   if(CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
@@ -24,29 +30,37 @@ elseif(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
 endif()
 
 
-add_library(mwrs-client STATIC
+set(CLIENT_SOURCE
   include/mwrs.h
   src/mwrs_client.cpp
   src/mwrs_messages.hpp)
 
-include_directories(mwrs-client PUBLIC include)
+add_library(client STATIC ${CLIENT_SOURCE})
 
-target_compile_features(mwrs-client PRIVATE cxx_std_11)
-set_target_properties(mwrs-client PROPERTIES
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${CLIENT_SOURCE})
+
+include_directories(client PUBLIC include)
+
+target_compile_features(client PRIVATE cxx_std_11)
+set_target_properties(client PROPERTIES
   CXX_STANDARD 11
   OUTPUT_NAME mwrsclient
   DEBUG_POSTFIX d)
 
 
-add_library(mwrs-server STATIC
+set(SERVER_SOURCE
   include/mwrs.h
   src/mwrs_server.cpp
   src/mwrs_messages.hpp)
 
-include_directories(mwrs-server PUBLIC include)
+add_library(server STATIC ${SERVER_SOURCE})
 
-target_compile_features(mwrs-server PRIVATE cxx_std_11)
-set_target_properties(mwrs-server PROPERTIES
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SERVER_SOURCE})
+
+include_directories(server PUBLIC include)
+
+target_compile_features(server PRIVATE cxx_std_11)
+set_target_properties(server PROPERTIES
   CXX_STANDARD 11
   OUTPUT_NAME mwrsserver
   DEBUG_POSTFIX d)
@@ -57,17 +71,17 @@ if(MWRS_INSTALL)
 
   install(FILES include/mwrs.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-  set(MWRS_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/mwrs")
+  set(MWRS_CMAKE_DIR "cmake")
 
   install(
-    TARGETS mwrs-client mwrs-server EXPORT MwRsTargets
+    TARGETS client server EXPORT MwRs
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
 
-  install(EXPORT MwRsTargets
-    FILE MwRsTargets.cmake
+  install(EXPORT MwRs
+    FILE mwrsConfig.cmake
     NAMESPACE mwrs::
     DESTINATION ${MWRS_CMAKE_DIR}
   )

@@ -13,9 +13,9 @@
 #include <stdint.h>
 
 #ifdef _WIN32
-# define VC_EXTRALEAN
-# define WIN32_LEAN_AND_MEAN
-# include <windows.h>
+#  define VC_EXTRALEAN
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
 #endif
 
 #pragma pack(push, 1)
@@ -45,6 +45,7 @@ struct mwrs_sv_msg_common_response
 #endif
 
   // Stat
+  mwrs_status stat;
 
   // Watcher
   mwrs_watcher_id watcher_id;

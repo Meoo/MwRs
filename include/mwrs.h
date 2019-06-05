@@ -13,7 +13,6 @@ extern "C" {
 #endif
 
 
-
 //
 //  SHARED HEADER
 //
@@ -142,15 +141,15 @@ typedef enum _mwrs_ret
 typedef enum _mwrs_open_flags
 {
 
-  MWRS_OPEN_READ =    0x00000001,
-  MWRS_OPEN_WRITE =   0x00000002,
-  MWRS_OPEN_APPEND =  0x00000004,
-  MWRS_OPEN_SEEK =    0x00000008,
+  MWRS_OPEN_READ   = 0x00000001,
+  MWRS_OPEN_WRITE  = 0x00000002,
+  MWRS_OPEN_APPEND = 0x00000004,
+  MWRS_OPEN_SEEK   = 0x00000008,
 
-  MWRS_OPEN_USER1 =   0x00010000,
-  MWRS_OPEN_USER2 =   0x00020000,
-  MWRS_OPEN_USER3 =   0x00040000,
-  MWRS_OPEN_USER4 =   0x00080000,
+  MWRS_OPEN_USER1 = 0x00010000,
+  MWRS_OPEN_USER2 = 0x00020000,
+  MWRS_OPEN_USER3 = 0x00040000,
+  MWRS_OPEN_USER4 = 0x00080000,
 
 } mwrs_open_flags;
 
@@ -188,7 +187,6 @@ typedef enum _mwrs_seek_origin
   MWRS_SEEK_END,
 
 } mwrs_seek_origin;
-
 
 
 //
@@ -261,7 +259,6 @@ typedef struct _mwrs_event
 } mwrs_event;
 
 
-
 /**
  * Returns 1 if the resource handle is valid, 0 otherwise.
  */
@@ -287,7 +284,6 @@ mwrs_ret mwrs_init(const char * server_name, int argc, const char ** argv);
 mwrs_ret mwrs_shutdown();
 
 
-
 /**
  * Open a resource.
  */
@@ -299,7 +295,7 @@ mwrs_ret mwrs_open(const char * id, mwrs_open_flags flags, mwrs_res * res_out);
 mwrs_ret mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags, mwrs_res * res_out);
 
 /**
- * Simultaneously open a resource and a watcher.
+ * Simultaneously open and watch a resource.
  *
  * This function will try to watch the resource even in case of error.
  * You can use `mwrs_watcher_is_valid` to check if the watcher has been created.
@@ -307,11 +303,21 @@ mwrs_ret mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags, 
  * If the resource has been opened, the watcher will not produce a READY event,
  * otherwise the behaviour is the same as `mwrs_watch`.
  */
-mwrs_ret mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_out, mwrs_watcher * watcher_out);
+mwrs_ret mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_out,
+                         mwrs_watcher * watcher_out);
 
 
 mwrs_ret mwrs_stat(const char * id, mwrs_status * stat_out);
 
+/**
+ * Simultaneously stat and watch a resource.
+ *
+ * This function will try to watch the resource even in case of error.
+ * You can use `mwrs_watcher_is_valid` to check if the watcher has been created.
+ * It is always safe to call `mwrs_close_watcher` on the watcher after this function.
+ * If the stat is successful, the watcher will not produce a READY event,
+ * otherwise the behaviour is the same as `mwrs_watch`.
+ */
 mwrs_ret mwrs_stat_watch(const char * id, mwrs_status * stat_out, mwrs_watcher * watcher_out);
 
 
@@ -334,7 +340,8 @@ mwrs_ret mwrs_read(mwrs_res * res, void * buffer, mwrs_size * read_len);
 
 mwrs_ret mwrs_write(mwrs_res * res, const void * buffer, mwrs_size * write_len);
 
-mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin, mwrs_size * position_out);
+mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin,
+                   mwrs_size * position_out);
 
 mwrs_ret mwrs_close(mwrs_res * res);
 
@@ -352,7 +359,6 @@ mwrs_ret mwrs_poll_event(mwrs_event * event_out);
 mwrs_ret mwrs_wait_event(mwrs_event * event_out);
 
 
-
 //
 //  SERVER HEADER
 //
@@ -363,8 +369,8 @@ mwrs_ret mwrs_wait_event(mwrs_event * event_out);
 
 typedef struct _mwrs_sv_client
 {
-  int     id;
-  void *  userdata;
+  int id;
+  void * userdata;
 
 } mwrs_sv_client;
 
@@ -386,8 +392,8 @@ typedef struct _mwrs_sv_res_open
   union
   {
     const char * path;
-    int          fd;
-    void *       win_handle;
+    int fd;
+    void * win_handle;
   };
 
 } mwrs_sv_res_open;
@@ -424,7 +430,8 @@ typedef void (*mwrs_sv_callback_disconnect)(mwrs_sv_client * client);
  * Only fill it if you return `MWRS_SUCCESS`.
  * If you give a file descriptor or a Windows handle, you don't have to close it manually.
  */
-typedef mwrs_ret (*mwrs_sv_callback_open)(mwrs_sv_client * client, const char * id, mwrs_open_flags flags, mwrs_sv_res_open * open_out);
+typedef mwrs_ret (*mwrs_sv_callback_open)(mwrs_sv_client * client, const char * id,
+                                          mwrs_open_flags flags, mwrs_sv_res_open * open_out);
 
 /**
  * Callback for stat function.
@@ -434,7 +441,26 @@ typedef mwrs_ret (*mwrs_sv_callback_open)(mwrs_sv_client * client, const char * 
  * `stat_out` is already allocated and initialized, just fill the structure.
  * Only fill it if you return `MWRS_SUCCESS`.
  */
-typedef mwrs_ret (*mwrs_sv_callback_stat)(mwrs_sv_client * client, const char * id, mwrs_status * stat_out);
+typedef mwrs_ret (*mwrs_sv_callback_stat)(mwrs_sv_client * client, const char * id,
+                                          mwrs_status * stat_out);
+
+/**
+ * Callback when a resource starts being watched.
+ *
+ * Callbacks can be invoked from any thread.
+ *
+ * This callback is invoked when the first watcher for `id` is added.
+ */
+typedef mwrs_ret (*mwrs_sv_callback_watch)(const char * id);
+
+/**
+ * Callback when a resource stops being watched.
+ *
+ * Callbacks can be invoked from any thread.
+ *
+ * This callback is invoked when the last watcher for `id` is removed.
+ */
+typedef mwrs_ret (*mwrs_sv_callback_unwatch)(const char * id);
 
 
 typedef struct _mwrs_sv_callbacks
@@ -444,6 +470,9 @@ typedef struct _mwrs_sv_callbacks
 
   mwrs_sv_callback_open open;
   mwrs_sv_callback_stat stat;
+
+  mwrs_sv_callback_watch watch;
+  mwrs_sv_callback_unwatch unwatch;
 
 } mwrs_sv_callbacks;
 
@@ -460,7 +489,6 @@ mwrs_ret mwrs_sv_push_event(const char * id, mwrs_event_type type);
 
 
 #endif // MWRS_INCLUDE_SERVER
-
 
 
 #ifdef __cplusplus

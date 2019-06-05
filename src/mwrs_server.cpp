@@ -5,8 +5,8 @@
  */
 
 #define MWRS_INCLUDE_SERVER
-#include <mwrs.h>
 #include "mwrs_messages.hpp"
+#include <mwrs.h>
 
 
 #include <algorithm>
@@ -14,18 +14,19 @@
 #include <cassert>
 #include <iterator>
 #include <list>
-#include <thread>
-#include <vector>
 #include <memory>
 #include <mutex>
 #include <set>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 #ifdef _WIN32
-# define VC_EXTRALEAN
-# define WIN32_LEAN_AND_MEAN
-# include <windows.h>
-# include <tchar.h>
-# include <io.h>
+#  define VC_EXTRALEAN
+#  define WIN32_LEAN_AND_MEAN
+#  include <io.h>
+#  include <tchar.h>
+#  include <windows.h>
 #endif
 
 
@@ -39,14 +40,13 @@ struct mwrs_server_data;
 struct mwrs_client_data;
 
 
-
 // Platform-specific data
 
 #ifdef _WIN32
 
 class WinEvent
 {
-public:
+ public:
   WinEvent() : event(CreateEvent(NULL, TRUE, FALSE, NULL)) {}
   ~WinEvent() { CloseHandle(event); }
 
@@ -58,10 +58,10 @@ public:
 
 class WinClientThread
 {
-public:
+ public:
   class ClientHandle
   {
-  public:
+   public:
     ClientHandle(WinClientThread * parent, HANDLE pipe);
     ~ClientHandle();
 
@@ -81,7 +81,7 @@ public:
     HANDLE process = INVALID_HANDLE_VALUE;
 
 
-  private:
+   private:
     void on_read(mwrs_size readlen);
 
 
@@ -92,11 +92,11 @@ public:
     HANDLE pipe = INVALID_HANDLE_VALUE;
     std::mutex mutex;
 
-    mwrs_cl_message read_message;
+    mwrs_cl_message read_message{};
     std::list<mwrs_sv_message> write_queue;
 
-    OVERLAPPED read_overlapped;
-    OVERLAPPED write_overlapped;
+    OVERLAPPED read_overlapped{};
+    OVERLAPPED write_overlapped{};
 
     bool reading = false;
     bool writing = false;
@@ -112,7 +112,7 @@ public:
   bool try_add_client(HANDLE pipe);
 
 
-private:
+ private:
   void run();
 
 
@@ -122,7 +122,7 @@ private:
   std::vector<std::unique_ptr<ClientHandle>> clients;
 
   std::thread thread;
-  std::atomic_bool stop_flag {false};
+  std::atomic_bool stop_flag{false};
 
   std::mutex mutex;
   std::vector<std::unique_ptr<ClientHandle>> pending_clients;
@@ -131,14 +131,14 @@ private:
 
 class WinAcceptThread
 {
-public:
+ public:
   WinAcceptThread(mwrs_server_data * server);
   ~WinAcceptThread();
 
   void interrupt();
 
 
-private:
+ private:
   void run();
 
   mwrs_server_data * server = nullptr;
@@ -146,14 +146,16 @@ private:
   WinEvent wake_event;
 
   std::thread thread;
-  std::atomic_bool stop_flag {false};
+  std::atomic_bool stop_flag{false};
 
-  //std::vector<std::unique_ptr<WinClientThread>> client_threads;
+  // std::vector<std::unique_ptr<WinClientThread>> client_threads;
 };
 // WinAcceptThread
 
 
-mwrs_ret fill_win_handle_from_res_open(const mwrs_client_data * client, const mwrs_sv_res_open * res_open, mwrs_sv_msg_common_response * response_out);
+mwrs_ret fill_win_handle_from_res_open(const mwrs_client_data * client,
+                                       const mwrs_sv_res_open * res_open,
+                                       mwrs_sv_msg_common_response * response_out);
 
 
 struct mwrs_server_plat
@@ -169,29 +171,36 @@ struct mwrs_client_plat
 #endif // _WIN32
 
 
-
 // Data structs
 
 struct mwrs_server_data
 {
-  char name[MWRS_SERVER_NAME_MAX + 1] {0};
+  char name[MWRS_SERVER_NAME_MAX + 1]{0};
   mwrs_sv_callbacks callbacks;
 
   std::mutex mutex;
-  std::set<std::unique_ptr<mwrs_client_data> > clients;
+  std::set<std::unique_ptr<mwrs_client_data>> clients;
   int next_client_id = 1;
+
+  mwrs_watcher_id next_watcher_id = 1;
+
+  struct watcher_instance
+  {
+    mwrs_client_data * client;
+    mwrs_watcher_id id;
+  };
+  std::unordered_map<std::string, std::set<watcher_instance>> watcher_data;
 
   mwrs_server_plat plat;
 };
 
 struct mwrs_client_data
 {
-  mwrs_sv_client client;
+  mwrs_sv_client client{};
   mwrs_server_data * server = nullptr;
 
   mwrs_client_plat plat;
 };
-
 
 
 // Platform-specific functions
@@ -205,13 +214,14 @@ void plat_client_queue_message(mwrs_client_data * client, const mwrs_sv_message 
 
 // Functions
 
-mwrs_ret server_on_client_connect(mwrs_server_data * server, int argc, char ** argv, mwrs_client_data ** client_out)
+mwrs_ret server_on_client_connect(mwrs_server_data * server, int argc, char ** argv,
+                                  mwrs_client_data ** client_out)
 {
   if (!server || !client_out)
     return MWRS_E_ARGS;
 
   std::unique_ptr<mwrs_client_data> client(new mwrs_client_data);
-  client->server = server;
+  client->server          = server;
   client->client.userdata = nullptr;
 
   {
@@ -241,10 +251,7 @@ void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * c
   std::unique_lock<std::mutex> lock(server->mutex);
 
   auto it = std::find_if(server->clients.begin(), server->clients.end(),
-    [client](const auto & v)
-    {
-      return v.get() == client;
-    });
+                         [client](const auto & v) { return v.get() == client; });
 
   if (it == server->clients.end())
   {
@@ -253,6 +260,8 @@ void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * c
   }
   else
   {
+    // TODO Clear all watchers
+
     if (server->callbacks.disconnect)
       server->callbacks.disconnect(&client->client);
 
@@ -269,7 +278,7 @@ mwrs_ret server_on_event(mwrs_server_data * server, const char * id, mwrs_event_
 
 void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message * message)
 {
-  mwrs_sv_message response {};
+  mwrs_sv_message response{};
   switch (message->type)
   {
   case MWRS_MSG_CL_OPEN:
@@ -283,8 +292,7 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
     {
     case MWRS_MSG_CL_WATCH:
     case MWRS_MSG_CL_OPEN_WATCH:
-    case MWRS_MSG_CL_STAT_WATCH:
-      break;
+    case MWRS_MSG_CL_STAT_WATCH: break;
     default: break;
     }
     // Open
@@ -292,17 +300,21 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
     {
     case MWRS_MSG_CL_OPEN:
     case MWRS_MSG_CL_OPEN_WATCH:
-      {
-        mwrs_sv_res_open res_open {};
-        response.common_response.status = client->server->callbacks.open(&client->client,
-          message->resource_request.resource_id, message->resource_request.flags, &res_open);
+    {
+      mwrs_sv_res_open res_open{};
+      response.common_response.status =
+          client->server->callbacks.open(&client->client, message->resource_request.resource_id,
+                                         message->resource_request.flags, &res_open);
 
-        if (response.common_response.status == MWRS_SUCCESS)
-        {
-          response.common_response.open_flags = message->resource_request.flags;
-          response.common_response.status = fill_win_handle_from_res_open(client, &res_open, &response.common_response);
-        }
+      if (response.common_response.status == MWRS_SUCCESS)
+      {
+        response.common_response.open_flags = message->resource_request.flags;
+        // TODO platform dependant, fixme
+        // Fill file descriptor after open_flags (can be used by res open) TODO use argument?
+        response.common_response.status =
+            fill_win_handle_from_res_open(client, &res_open, &response.common_response);
       }
+    }
     default: break;
     }
     // Stat
@@ -310,15 +322,18 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
     {
     case MWRS_MSG_CL_STAT:
     case MWRS_MSG_CL_STAT_WATCH:
+    {
+      mwrs_status res_stat{};
+      response.common_response.status = client->server->callbacks.stat(
+          &client->client, message->resource_request.resource_id, &res_stat);
       break;
-    default:
-      break;
+    }
+    default: break;
     }
     break;
 
   case MWRS_MSG_CL_WATCHER_OPEN:
-  case MWRS_MSG_CL_CLOSE_WATCHER:
-    break;
+  case MWRS_MSG_CL_CLOSE_WATCHER: break;
 
   default:
     // TODO error
@@ -330,9 +345,7 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
 // client_on_receive_message
 
 
-
 //
-
 
 
 // Platform-specific implementation
@@ -346,7 +359,7 @@ mwrs_win_handle_data to_mwrs_handle(HANDLE win_handle)
 }
 
 WinClientThread::ClientHandle::ClientHandle(WinClientThread * parent, HANDLE pipe)
-  : parent(parent), pipe(pipe)
+    : parent(parent), pipe(pipe)
 {
 }
 
@@ -548,7 +561,7 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
       else
       {
         DWORD process_id = read_message.win_handshake.process_id;
-        process = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process_id);
+        process          = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process_id);
 
         // Documentation says NULL
         if (process == INVALID_HANDLE_VALUE || process == NULL)
@@ -597,19 +610,14 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
 // Client on_read
 
 
-
-WinClientThread::WinClientThread(mwrs_server_data * server)
-  : server(server)
+WinClientThread::WinClientThread(mwrs_server_data * server) : server(server)
 {
   // Do not call before all members are initialized
   std::thread t([this]() { run(); });
   thread.swap(t);
 }
 
-WinClientThread::~WinClientThread()
-{
-  interrupt();
-}
+WinClientThread::~WinClientThread() { interrupt(); }
 
 void WinClientThread::interrupt()
 {
@@ -647,7 +655,8 @@ void WinClientThread::run()
       std::unique_lock<std::mutex> lock(mutex);
       if (!pending_clients.empty())
       {
-        std::move(std::begin(pending_clients), std::end(pending_clients), std::back_inserter(clients));
+        std::move(std::begin(pending_clients), std::end(pending_clients),
+                  std::back_inserter(clients));
         pending_clients.clear();
       }
     }
@@ -677,8 +686,8 @@ void WinClientThread::run()
     }
 
     // wake_event for thread + read & write per client
-    int num_events = (int)( 1 + clients.size() * 2 );
-    DWORD dw = WaitForMultipleObjects(num_events, events, FALSE, INFINITE);
+    int num_events = (int)(1 + clients.size() * 2);
+    DWORD dw       = WaitForMultipleObjects(num_events, events, FALSE, INFINITE);
 
     // wake_event
     if (dw == WAIT_OBJECT_0)
@@ -690,7 +699,7 @@ void WinClientThread::run()
     else if (dw >= WAIT_OBJECT_0 && dw < WAIT_OBJECT_0 + num_events)
     {
       int client_num = (dw - WAIT_OBJECT_0 - 1) / 2;
-      bool is_read = ((dw - WAIT_OBJECT_0 - 1) % 2) == 0;
+      bool is_read   = ((dw - WAIT_OBJECT_0 - 1) % 2) == 0;
 
       ClientHandle * client = clients.at(client_num).get();
 
@@ -720,19 +729,14 @@ void WinClientThread::run()
 // ClientThread run
 
 
-
-WinAcceptThread::WinAcceptThread(mwrs_server_data * server)
-  : server(server)
+WinAcceptThread::WinAcceptThread(mwrs_server_data * server) : server(server)
 {
   // Do not call before all members are initialized
   std::thread t([this]() { run(); });
   thread.swap(t);
 }
 
-WinAcceptThread::~WinAcceptThread()
-{
-  interrupt();
-}
+WinAcceptThread::~WinAcceptThread() { interrupt(); }
 
 void WinAcceptThread::interrupt()
 {
@@ -760,14 +764,9 @@ void WinAcceptThread::run()
   while (!stop_flag)
   {
     HANDLE pipe = CreateNamedPipe(
-      pipename,
-      PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-      PIPE_UNLIMITED_INSTANCES,
-      sizeof(mwrs_sv_message),
-      sizeof(mwrs_cl_message),
-      0,
-      NULL);
+        pipename, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+        PIPE_UNLIMITED_INSTANCES, sizeof(mwrs_sv_message), sizeof(mwrs_cl_message), 0, NULL);
 
     if (pipe == INVALID_HANDLE_VALUE)
     {
@@ -793,7 +792,7 @@ void WinAcceptThread::run()
 
     if (err == ERROR_IO_PENDING)
     {
-      HANDLE events[2] {wake_event, accept_event};
+      HANDLE events[2]{wake_event, accept_event};
 
       // Ignore return,
       DWORD dw = WaitForMultipleObjects(2, events, FALSE, INFINITE);
@@ -872,30 +871,37 @@ void WinAcceptThread::run()
 // WinAcceptThread run
 
 
-mwrs_ret fill_win_handle_from_res_open(const mwrs_client_data* client, const mwrs_sv_res_open* res_open, mwrs_sv_msg_common_response* response_out)
+mwrs_ret fill_win_handle_from_res_open(const mwrs_client_data * client,
+                                       const mwrs_sv_res_open * res_open,
+                                       mwrs_sv_msg_common_response * response_out)
 {
   HANDLE handle = INVALID_HANDLE_VALUE;
 
   switch (res_open->type)
   {
   case MWRS_SV_PATH:
-    return MWRS_E_SERVERERR; // TODO open
+    handle = CreateFileA(res_open->path,
+                         ((response_out->open_flags & MWRS_OPEN_READ) ? GENERIC_READ : 0) |
+                             ((response_out->open_flags & MWRS_OPEN_WRITE) ? GENERIC_WRITE : 0),
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, NULL);
+    if (handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
+      return MWRS_E_NOTFOUND;
     break;
-  case MWRS_SV_FD:
-    handle = reinterpret_cast<HANDLE>(_get_osfhandle(res_open->fd));
-    break;
-  case MWRS_SV_WIN_HANDLE:
-    handle = res_open->win_handle;
-    break;
+  case MWRS_SV_FD: handle = reinterpret_cast<HANDLE>(_get_osfhandle(res_open->fd)); break;
+  case MWRS_SV_WIN_HANDLE: handle = res_open->win_handle; break;
 
-  default:
-    return MWRS_E_SERVERIMPL;
+  default: return MWRS_E_SERVERIMPL;
   }
+
+  if (handle == INVALID_HANDLE_VALUE)
+    return MWRS_E_SERVERIMPL;
 
   HANDLE duplicate = INVALID_HANDLE_VALUE;
 
   // DUPLICATE_CLOSE_SOURCE is not enough for FDs
-  BOOL ok = DuplicateHandle(GetCurrentProcess(), handle, client->plat.handle->process, &duplicate, 0, TRUE, DUPLICATE_SAME_ACCESS);
+  BOOL ok = DuplicateHandle(GetCurrentProcess(), handle, client->plat.handle->process, &duplicate,
+                            0, TRUE, DUPLICATE_SAME_ACCESS);
 
   if (res_open->type == MWRS_SV_FD)
     _close(res_open->fd);
@@ -913,7 +919,6 @@ mwrs_ret fill_win_handle_from_res_open(const mwrs_client_data* client, const mwr
   return MWRS_SUCCESS;
 }
 // fill_win_handle_from_res_open
-
 
 
 mwrs_ret plat_server_start(mwrs_server_data * server)
@@ -949,13 +954,11 @@ void plat_client_queue_message(mwrs_client_data * client, const mwrs_sv_message 
 #endif // _WIN32
 
 
-
 // Server instance holder
 std::unique_ptr<mwrs_server_data> instance;
 
 
-}
-// unnamed ns
+} // namespace
 
 
 // API implementation

@@ -6,7 +6,7 @@ target_compile_features(example-server PRIVATE cxx_std_11)
 set_property(TARGET example-server PROPERTY CXX_STANDARD 11)
 
 target_link_libraries(example-server
-  mwrs-server)
+  server)
 
 
 add_executable(example-client
@@ -16,4 +16,4 @@ target_compile_features(example-client PRIVATE cxx_std_11)
 set_property(TARGET example-client PROPERTY CXX_STANDARD 11)
 
 target_link_libraries(example-client
-  mwrs-client)
+  client)

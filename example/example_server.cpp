@@ -7,14 +7,14 @@
 #include <csignal>
 #include <thread>
 
-#include <io.h>
 #include <fcntl.h>
+#include <io.h>
 
 
 namespace
 {
 
-std::atomic_bool stop_flag {false};
+std::atomic_bool stop_flag{false};
 void sig_handler(int) { stop_flag = true; }
 
 
@@ -24,12 +24,10 @@ mwrs_ret my_connect(mwrs_sv_client * client, int argc, char ** argv)
   return MWRS_SUCCESS;
 }
 
-void my_disconnect(mwrs_sv_client * client)
-{
-  printf("Client disconnected\n");
-}
+void my_disconnect(mwrs_sv_client * client) { printf("Client disconnected\n"); }
 
-mwrs_ret my_open(mwrs_sv_client * client, const char * id, mwrs_open_flags flags, mwrs_sv_res_open * open_out)
+mwrs_ret my_open(mwrs_sv_client * client, const char * id, mwrs_open_flags flags,
+                 mwrs_sv_res_open * open_out)
 {
   int fd = _open(id, _O_RDONLY | _O_BINARY);
 
@@ -40,7 +38,7 @@ mwrs_ret my_open(mwrs_sv_client * client, const char * id, mwrs_open_flags flags
   }
 
   open_out->type = MWRS_SV_FD;
-  open_out->fd = fd;
+  open_out->fd   = fd;
 
   return MWRS_SUCCESS;
 }
@@ -60,10 +58,10 @@ int main(int argc, char ** argv)
 
   mwrs_sv_callbacks sv_callbacks = {};
 
-  sv_callbacks.connect = my_connect;
+  sv_callbacks.connect    = my_connect;
   sv_callbacks.disconnect = my_disconnect;
-  sv_callbacks.open = my_open;
-  sv_callbacks.stat = my_stat;
+  sv_callbacks.open       = my_open;
+  sv_callbacks.stat       = my_stat;
 
   printf("Server init\n");
 

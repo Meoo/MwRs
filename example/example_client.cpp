@@ -7,7 +7,7 @@
 #include <thread>
 
 
-int main(int argc, char** argv)
+int main(int argc, char ** argv)
 {
   printf("Client init...\n");
 
@@ -19,14 +19,14 @@ int main(int argc, char** argv)
 
   printf("Client init OK\n");
 
-  mwrs_res res {};
+  mwrs_res res{};
   mwrs_ret ret = mwrs_open("C:/Test.txt", MWRS_OPEN_READ, &res);
 
   if (ret == MWRS_SUCCESS)
   {
     printf("Open OK\n");
 
-    char buf[128] {};
+    char buf[128]{};
     mwrs_size sz = 128;
     if (mwrs_read(&res, buf, &sz) == MWRS_SUCCESS)
       printf("Data: %s\n", buf);
