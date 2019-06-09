@@ -113,6 +113,9 @@ struct mwrs_cl_win_handshake
 {
   int mwrs_version;
   DWORD process_id;
+
+  int argc;
+  char argv[512];
 };
 #endif
 

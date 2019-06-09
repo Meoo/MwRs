@@ -1,7 +1,6 @@
 
 * Stat
 * Errors, warn / error callbacks
-* Support argc / argv
 * Events
 * Watchers
 

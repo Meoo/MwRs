@@ -18,9 +18,15 @@ std::atomic_bool stop_flag{false};
 void sig_handler(int) { stop_flag = true; }
 
 
-mwrs_ret my_connect(mwrs_sv_client * client, int argc, char ** argv)
+mwrs_ret my_connect(mwrs_sv_client * client, int argc, const char ** argv)
 {
   printf("Client connected\n");
+
+  for (int i = 0; i < argc; ++i)
+  {
+    printf("Arg %d : %s\n", i, argv[i]);
+  }
+
   return MWRS_SUCCESS;
 }
 

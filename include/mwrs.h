@@ -12,6 +12,28 @@
 extern "C" {
 #endif
 
+/* @MWRS_CMAKE_GENERATED@
+#cmakedefine MWRS_SHARED
+/* */
+
+#ifdef MWRS_SHARED
+#  if defined _WIN32 || defined __CYGWIN__
+#    ifdef MWRS_SHARED_BUILD
+#      define MWRS_API __declspec(dllexport)
+#    else
+#      define MWRS_API __declspec(dllimport)
+#    endif
+#  else
+#    if __GNUC__ >= 4
+#      define MWRS_API __attribute__((visibility("default")))
+#    else
+#      define MWRS_API
+#    endif
+#  endif
+#else
+#  define MWRS_API
+#endif
+
 
 //
 //  SHARED HEADER
@@ -21,12 +43,16 @@ extern "C" {
 // Constants
 enum
 {
-  MWRS_VERSION = 1000,
+  //               vvvv      Major
+  //                   vvvv  Minor
+  MWRS_VERSION = 0x00010000,
 
   // See sockaddr_un limitations
+  // A byte is used for null terminator
   MWRS_SERVER_NAME_MAX = 64,
 
   // Max length for resource identifier
+  // A byte is used for null terminator
   MWRS_ID_MAX = 512
 };
 
@@ -262,18 +288,18 @@ typedef struct _mwrs_event
 /**
  * Returns 1 if the resource handle is valid, 0 otherwise.
  */
-int mwrs_res_is_valid(const mwrs_res * res);
+int MWRS_API mwrs_res_is_valid(const mwrs_res * res);
 
 /**
  * Returns 1 if the watcher handle is valid, 0 otherwise.
  */
-int mwrs_watcher_is_valid(const mwrs_watcher * watcher);
+int MWRS_API mwrs_watcher_is_valid(const mwrs_watcher * watcher);
 
 
 /**
  * Open a pipe to the local server named `server_name`.
  */
-mwrs_ret mwrs_init(const char * server_name, int argc, const char ** argv);
+mwrs_ret MWRS_API mwrs_init(const char * server_name, int argc, const char ** argv);
 
 /**
  * Close the connection with the server.
@@ -281,18 +307,19 @@ mwrs_ret mwrs_init(const char * server_name, int argc, const char ** argv);
  * All the remaining handles are invalidated,
  * and using them in any way is undefined behaviour.
  */
-mwrs_ret mwrs_shutdown();
+mwrs_ret MWRS_API mwrs_shutdown();
 
 
 /**
  * Open a resource.
  */
-mwrs_ret mwrs_open(const char * id, mwrs_open_flags flags, mwrs_res * res_out);
+mwrs_ret MWRS_API mwrs_open(const char * id, mwrs_open_flags flags, mwrs_res * res_out);
 
 /**
  * Open a resource pointed by a valid watcher.
  */
-mwrs_ret mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags, mwrs_res * res_out);
+mwrs_ret MWRS_API mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags,
+                                    mwrs_res * res_out);
 
 /**
  * Simultaneously open and watch a resource.
@@ -303,11 +330,11 @@ mwrs_ret mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags, 
  * If the resource has been opened, the watcher will not produce a READY event,
  * otherwise the behaviour is the same as `mwrs_watch`.
  */
-mwrs_ret mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_out,
-                         mwrs_watcher * watcher_out);
+mwrs_ret MWRS_API mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_out,
+                                  mwrs_watcher * watcher_out);
 
 
-mwrs_ret mwrs_stat(const char * id, mwrs_status * stat_out);
+mwrs_ret MWRS_API mwrs_stat(const char * id, mwrs_status * stat_out);
 
 /**
  * Simultaneously stat and watch a resource.
@@ -318,7 +345,8 @@ mwrs_ret mwrs_stat(const char * id, mwrs_status * stat_out);
  * If the stat is successful, the watcher will not produce a READY event,
  * otherwise the behaviour is the same as `mwrs_watch`.
  */
-mwrs_ret mwrs_stat_watch(const char * id, mwrs_status * stat_out, mwrs_watcher * watcher_out);
+mwrs_ret MWRS_API mwrs_stat_watch(const char * id, mwrs_status * stat_out,
+                                  mwrs_watcher * watcher_out);
 
 
 /**
@@ -326,24 +354,24 @@ mwrs_ret mwrs_stat_watch(const char * id, mwrs_status * stat_out, mwrs_watcher *
  *
  * If the resource is available, a READY event will be produced.
  */
-mwrs_ret mwrs_watch(const char * id, mwrs_watcher * watcher_out);
+mwrs_ret MWRS_API mwrs_watch(const char * id, mwrs_watcher * watcher_out);
 
 /**
  * Close a watcher.
  *
  * Pending events for this watcher will not be received.
  */
-mwrs_ret mwrs_close_watcher(mwrs_watcher * watcher);
+mwrs_ret MWRS_API mwrs_close_watcher(mwrs_watcher * watcher);
 
 
-mwrs_ret mwrs_read(mwrs_res * res, void * buffer, mwrs_size * read_len);
+mwrs_ret MWRS_API mwrs_read(mwrs_res * res, void * buffer, mwrs_size * read_len);
 
-mwrs_ret mwrs_write(mwrs_res * res, const void * buffer, mwrs_size * write_len);
+mwrs_ret MWRS_API mwrs_write(mwrs_res * res, const void * buffer, mwrs_size * write_len);
 
-mwrs_ret mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin,
-                   mwrs_size * position_out);
+mwrs_ret MWRS_API mwrs_seek(mwrs_res * res, mwrs_size offset, mwrs_seek_origin origin,
+                            mwrs_size * position_out);
 
-mwrs_ret mwrs_close(mwrs_res * res);
+mwrs_ret MWRS_API mwrs_close(mwrs_res * res);
 
 
 /**
@@ -351,12 +379,12 @@ mwrs_ret mwrs_close(mwrs_res * res);
  *
  * Returns E_AGAIN if no event is available.
  */
-mwrs_ret mwrs_poll_event(mwrs_event * event_out);
+mwrs_ret MWRS_API mwrs_poll_event(mwrs_event * event_out);
 
 /**
  * Get next event, blocking.
  */
-mwrs_ret mwrs_wait_event(mwrs_event * event_out);
+mwrs_ret MWRS_API mwrs_wait_event(mwrs_event * event_out);
 
 
 //
@@ -409,7 +437,7 @@ typedef struct _mwrs_sv_res_open
  * Return `MWRS_SUCCESS` to accept the connection.
  * Every other code will deny the connection, disconnect callback will not be called.
  */
-typedef mwrs_ret (*mwrs_sv_callback_connect)(mwrs_sv_client * client, int argc, char ** argv);
+typedef mwrs_ret (*mwrs_sv_callback_connect)(mwrs_sv_client * client, int argc, const char ** argv);
 
 /**
  * Callback for client disconnection.
@@ -477,15 +505,15 @@ typedef struct _mwrs_sv_callbacks
 } mwrs_sv_callbacks;
 
 
-mwrs_ret mwrs_sv_init(const char * server_name, mwrs_sv_callbacks * callbacks);
+mwrs_ret MWRS_API mwrs_sv_init(const char * server_name, mwrs_sv_callbacks * callbacks);
 
-mwrs_ret mwrs_sv_shutdown();
+mwrs_ret MWRS_API mwrs_sv_shutdown();
 
 
 /**
  * Push an event to all connected clients listening to a resource.
  */
-mwrs_ret mwrs_sv_push_event(const char * id, mwrs_event_type type);
+mwrs_ret MWRS_API mwrs_sv_push_event(const char * id, mwrs_event_type type);
 
 
 #endif // MWRS_INCLUDE_SERVER

@@ -1,5 +1,5 @@
 
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.8)
 
 project(MwRs)
 
@@ -8,11 +8,16 @@ set(MWRS_BUILD_EXAMPLE OFF CACHE BOOL "Build MwRs example")
 set(MWRS_INSTALL OFF CACHE BOOL "Create MwRs install target")
 
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE})
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE})
+
 # Default install directory is <project>/install
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/install" CACHE PATH "..." FORCE)
 endif()
 
+set(CXX_EXTENSIONS OFF)
 
 if(MSVC)
   # Force to always compile with W4
@@ -35,7 +40,7 @@ set(CLIENT_SOURCE
   src/mwrs_client.cpp
   src/mwrs_messages.hpp)
 
-add_library(client STATIC ${CLIENT_SOURCE})
+add_library(client ${CLIENT_SOURCE})
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${CLIENT_SOURCE})
 
@@ -53,7 +58,7 @@ set(SERVER_SOURCE
   src/mwrs_server.cpp
   src/mwrs_messages.hpp)
 
-add_library(server STATIC ${SERVER_SOURCE})
+add_library(server ${SERVER_SOURCE})
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SERVER_SOURCE})
 
@@ -66,18 +71,36 @@ set_target_properties(server PROPERTIES
   DEBUG_POSTFIX d)
 
 
+if(BUILD_SHARED_LIBS)
+  set(MWRS_SHARED ON)
+  target_compile_definitions(client PRIVATE MWRS_SHARED MWRS_SHARED_BUILD)
+  target_compile_definitions(server PRIVATE MWRS_SHARED MWRS_SHARED_BUILD)
+  if(NOT WIN32 AND (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX))
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+  endif()
+endif()
+
 if(MWRS_INSTALL)
   include(GNUInstallDirs)
 
-  install(FILES include/mwrs.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  set(MWRS_CMAKE_GENERATED "*/")
+  configure_file(include/mwrs.h ${CMAKE_CURRENT_BINARY_DIR}/mwrs.h)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/mwrs.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
   set(MWRS_CMAKE_DIR "cmake")
 
   install(
     TARGETS client server EXPORT MwRs
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
+
+  install(
+    FILES $<TARGET_PDB_FILE:client> $<TARGET_PDB_FILE:server>
+    DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL
   )
 
   install(EXPORT MwRs

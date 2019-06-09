@@ -11,7 +11,10 @@ int main(int argc, char ** argv)
 {
   printf("Client init...\n");
 
-  if (mwrs_init("example-server", 0, nullptr) != MWRS_SUCCESS)
+  int mwrs_argc            = 2;
+  const char * mwrs_argv[] = {"test1", "test2"};
+
+  if (mwrs_init("example-server", mwrs_argc, mwrs_argv) != MWRS_SUCCESS)
   {
     printf("Client init failed\n");
     return 1;

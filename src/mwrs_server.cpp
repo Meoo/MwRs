@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <cstring>
 #include <iterator>
 #include <list>
 #include <memory>
@@ -32,6 +33,11 @@
 
 namespace
 {
+
+const DWORD pipeBufferSize = 4096;
+
+static_assert(pipeBufferSize >= sizeof(mwrs_cl_message), "");
+static_assert(pipeBufferSize >= sizeof(mwrs_sv_message), "");
 
 
 // Forward decl
@@ -175,7 +181,7 @@ struct mwrs_client_plat
 
 struct mwrs_server_data
 {
-  char name[MWRS_SERVER_NAME_MAX + 1]{0};
+  char name[MWRS_SERVER_NAME_MAX]{0};
   mwrs_sv_callbacks callbacks;
 
   std::mutex mutex;
@@ -214,7 +220,7 @@ void plat_client_queue_message(mwrs_client_data * client, const mwrs_sv_message 
 
 // Functions
 
-mwrs_ret server_on_client_connect(mwrs_server_data * server, int argc, char ** argv,
+mwrs_ret server_on_client_connect(mwrs_server_data * server, int argc, const char ** argv,
                                   mwrs_client_data ** client_out)
 {
   if (!server || !client_out)
@@ -250,8 +256,9 @@ void server_on_client_disconnect(mwrs_server_data * server, mwrs_client_data * c
 
   std::unique_lock<std::mutex> lock(server->mutex);
 
-  auto it = std::find_if(server->clients.begin(), server->clients.end(),
-                         [client](const auto & v) { return v.get() == client; });
+  auto it = std::find_if(
+      server->clients.begin(), server->clients.end(),
+      [client](const std::unique_ptr<mwrs_client_data> & v) { return v.get() == client; });
 
   if (it == server->clients.end())
   {
@@ -570,8 +577,24 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
           assert(0 && "Failed to open client process");
         }
 
+        const char * argv_ptr[128]{0}; // TODO hardcoded here?
+        int argc    = read_message.win_handshake.argc;
+        char * argv = read_message.win_handshake.argv;
+
+        if (argc > 128)
+        {
+          // TODO warning
+          argc = 128;
+        }
+
+        for (int i = 0; i < argc; ++i)
+        {
+          argv_ptr[i] = argv;
+          argv += std::strlen(argv) + 1;
+        }
+
         // TODO args
-        mwrs_ret ret = server_on_client_connect(parent->server, 0, nullptr, &client);
+        mwrs_ret ret = server_on_client_connect(parent->server, argc, argv_ptr, &client);
 
         if (ret == MWRS_SUCCESS)
         {
@@ -766,7 +789,7 @@ void WinAcceptThread::run()
     HANDLE pipe = CreateNamedPipe(
         pipename, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-        PIPE_UNLIMITED_INSTANCES, sizeof(mwrs_sv_message), sizeof(mwrs_cl_message), 0, NULL);
+        PIPE_UNLIMITED_INSTANCES, pipeBufferSize, pipeBufferSize, 0, NULL);
 
     if (pipe == INVALID_HANDLE_VALUE)
     {
@@ -973,7 +996,9 @@ mwrs_ret mwrs_sv_init(const char * server_name, mwrs_sv_callbacks * callbacks)
 
   ::instance.reset(new mwrs_server_data);
 
-  std::strncpy(::instance->name, server_name, MWRS_SERVER_NAME_MAX);
+  // Must have null terminator
+  std::memset(::instance->name, 0, MWRS_SERVER_NAME_MAX);
+  std::strncpy(::instance->name, server_name, MWRS_SERVER_NAME_MAX - 1);
   ::instance->callbacks = *callbacks;
 
   mwrs_ret ret = plat_server_start(::instance.get());

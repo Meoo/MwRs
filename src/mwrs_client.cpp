@@ -9,6 +9,7 @@
 
 
 #include <cassert>
+#include <cstring>
 #include <memory>
 #include <mutex>
 
@@ -82,7 +83,10 @@ mwrs_ret send_res_request(mwrs_data * client, mwrs_cl_msg_type type, const char 
 {
   mwrs_cl_message message;
   message.type = type;
-  std::strncpy(message.resource_request.resource_id, res_id, MWRS_ID_MAX);
+
+  // Must have null terminator
+  std::memset(message.resource_request.resource_id, 0, MWRS_ID_MAX);
+  std::strncpy(message.resource_request.resource_id, res_id, MWRS_ID_MAX - 1);
   message.resource_request.flags = flags;
   return plat_send_message(client, &message);
 }
@@ -165,6 +169,24 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
     handshake.type                       = MWRS_MSG_CL_WIN_HANDSHAKE;
     handshake.win_handshake.mwrs_version = MWRS_VERSION;
     handshake.win_handshake.process_id   = GetCurrentProcessId();
+
+    handshake.win_handshake.argc = 0;
+    char * argv_dest             = handshake.win_handshake.argv;
+    int argv_dest_len            = sizeof(mwrs_cl_win_handshake::argv);
+    for (int i = 0; i < argc; ++i)
+    {
+      int len = (int)std::strlen(argv[i]) + 1; // Include null character
+      if (argv_dest_len < len)
+      {
+        // TODO truncated warning
+        break;
+      }
+
+      ++handshake.win_handshake.argc;
+      std::memcpy(argv_dest, argv[i], len);
+      argv_dest += len;
+      argv_dest_len -= len;
+    }
 
     mwrs_ret ret = plat_send_message(client, &handshake);
 
@@ -334,6 +356,7 @@ std::unique_ptr<mwrs_data> instance;
 
 int mwrs_res_is_valid(const mwrs_res * res)
 {
+  // TODO opaque is platform dependant, fixme
   return res->opaque != nullptr && res->opaque != INVALID_HANDLE_VALUE;
 }
 
