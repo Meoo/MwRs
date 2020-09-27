@@ -32,8 +32,22 @@ enum mwrs_sv_msg_type
 };
 
 
+struct mwrs_sv_message
+{
+  mwrs_sv_msg_type type;
+  unsigned int length;
+
+  // data
+};
+
+
+
 struct mwrs_sv_msg_common_response
 {
+  mwrs_sv_msg_type type;
+  unsigned int length;
+
+
   mwrs_ret status;
 
   // Resource
@@ -54,24 +68,13 @@ struct mwrs_sv_msg_common_response
 #ifdef _WIN32
 struct mwrs_sv_win_handshake_ack
 {
+  mwrs_sv_msg_type type;
+  unsigned int length;
+
+
   mwrs_ret status;
 };
 #endif
-
-
-struct mwrs_sv_message
-{
-  mwrs_sv_msg_type type;
-
-  union
-  {
-    mwrs_sv_msg_common_response common_response;
-
-#ifdef _WIN32
-    mwrs_sv_win_handshake_ack win_handshake_ack;
-#endif
-  };
-};
 
 
 //
@@ -94,15 +97,32 @@ enum mwrs_cl_msg_type
 };
 
 
+struct mwrs_cl_message
+{
+  mwrs_cl_msg_type type;
+  unsigned int length;
+
+  // data
+};
+
+
 struct mwrs_cl_msg_resource_request
 {
-  mwrs_res_id resource_id;
+  mwrs_cl_msg_type type;
+  unsigned int length;
+
 
   mwrs_open_flags flags; // used for open and open_watch
+
+  char resource_id; // extend message
 };
 
 struct mwrs_cl_msg_watcher_request
 {
+  mwrs_cl_msg_type type;
+  unsigned int length;
+
+
   mwrs_watcher_id watcher_id;
 
   mwrs_open_flags flags; // used for open
@@ -111,29 +131,17 @@ struct mwrs_cl_msg_watcher_request
 #ifdef _WIN32
 struct mwrs_cl_win_handshake
 {
+  mwrs_cl_msg_type type;
+  unsigned int length;
+
+
   int mwrs_version;
   DWORD process_id;
 
   int argc;
-  char argv[512];
+  char argv; // extend message
 };
 #endif
-
-
-struct mwrs_cl_message
-{
-  mwrs_cl_msg_type type;
-
-  union
-  {
-    mwrs_cl_msg_resource_request resource_request;
-    mwrs_cl_msg_watcher_request watcher_request;
-
-#ifdef _WIN32
-    mwrs_cl_win_handshake win_handshake;
-#endif
-  };
-};
 
 
 } // extern "C"

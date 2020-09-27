@@ -5,10 +5,11 @@
  */
 
 #include "mwrs_messages.hpp"
-#include <mwrs.h>
+#include <mwrs_client.h>
 
 
 #include <cassert>
+#include <cstddef>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -56,10 +57,11 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
 
 void plat_stop(mwrs_data * client);
 
-mwrs_ret plat_send_message(mwrs_data * client, const mwrs_cl_message * message);
+mwrs_ret plat_send_message(mwrs_data * client, mwrs_cl_message * message);
 
-mwrs_ret plat_receive_message(mwrs_data * client, mwrs_sv_message * message);
+mwrs_ret plat_receive_message(mwrs_data * client, mwrs_sv_message ** message_out);
 
+bool plat_res_is_valid(const mwrs_res * res);
 
 mwrs_ret plat_read(mwrs_res * res, void * buffer, mwrs_size * read_len);
 
@@ -73,22 +75,31 @@ mwrs_ret plat_close(mwrs_res * res);
 
 // Functions
 
-mwrs_ret receive_response(mwrs_data * client, mwrs_sv_message * message)
+void * message_alloc(size_t size) { return new char[size]{}; }
+
+void message_free(void * message) { delete[] message; }
+
+
+mwrs_ret receive_response(mwrs_data * client, mwrs_sv_message ** message_out)
 {
-  return plat_receive_message(client, message); // TODO
+  return plat_receive_message(client, message_out); // TODO
 }
 
 mwrs_ret send_res_request(mwrs_data * client, mwrs_cl_msg_type type, const char * res_id,
                           mwrs_open_flags flags = (mwrs_open_flags)0)
 {
-  mwrs_cl_message message;
-  message.type = type;
+  std::size_t res_id_len = std::strlen(res_id);
 
-  // Must have null terminator
-  std::memset(message.resource_request.resource_id, 0, MWRS_ID_MAX);
-  std::strncpy(message.resource_request.resource_id, res_id, MWRS_ID_MAX - 1);
-  message.resource_request.flags = flags;
-  return plat_send_message(client, &message);
+  mwrs_cl_msg_resource_request * resource_request =
+      (mwrs_cl_msg_resource_request *)message_alloc(sizeof(mwrs_cl_msg_resource_request) + res_id_len);
+  resource_request->type = type;
+  resource_request->length = (unsigned int)(sizeof(mwrs_cl_msg_resource_request) + res_id_len);
+
+  // resource_id must have null terminator
+  // We only copy data but message type contains 1 extra byte
+  std::memcpy(&resource_request->resource_id, res_id, res_id_len);
+  resource_request->flags = flags;
+  return plat_send_message(client, (mwrs_cl_message *)resource_request);
 }
 
 mwrs_ret common_response_get_res(const mwrs_sv_msg_common_response * response, mwrs_res * res_out)
@@ -153,7 +164,7 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
   }
 
   {
-    DWORD mode = PIPE_READMODE_MESSAGE;
+    DWORD mode = PIPE_READMODE_BYTE;
     if (!SetNamedPipeHandleState(client->plat.pipe, &mode, NULL, NULL))
     {
       // TODO error
@@ -164,31 +175,29 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
   }
 
   {
-    // Send handshake
-    mwrs_cl_message handshake;
-    handshake.type                       = MWRS_MSG_CL_WIN_HANDSHAKE;
-    handshake.win_handshake.mwrs_version = MWRS_VERSION;
-    handshake.win_handshake.process_id   = GetCurrentProcessId();
+    // Compute argv length
+    std::size_t argvlen = 0;
+    for (int i = 0; i < argc; ++i)
+      argvlen += std::strlen(argv[i]) + 1;
 
-    handshake.win_handshake.argc = 0;
-    char * argv_dest             = handshake.win_handshake.argv;
-    int argv_dest_len            = sizeof(mwrs_cl_win_handshake::argv);
+    // Send handshake
+    mwrs_cl_win_handshake * handshake =
+        (mwrs_cl_win_handshake *)message_alloc(offsetof(mwrs_cl_win_handshake, argv) + argvlen);
+    handshake->type         = MWRS_MSG_CL_WIN_HANDSHAKE;
+    handshake->length       = offsetof(mwrs_cl_win_handshake, argv) + argvlen;
+    handshake->mwrs_version = MWRS_VERSION;
+    handshake->process_id   = GetCurrentProcessId();
+    handshake->argc         = argc;
+
+    char * argv_dest  = &handshake->argv;
     for (int i = 0; i < argc; ++i)
     {
-      int len = (int)std::strlen(argv[i]) + 1; // Include null character
-      if (argv_dest_len < len)
-      {
-        // TODO truncated warning
-        break;
-      }
-
-      ++handshake.win_handshake.argc;
+      std::size_t len = std::strlen(argv[i]) + 1;
       std::memcpy(argv_dest, argv[i], len);
       argv_dest += len;
-      argv_dest_len -= len;
     }
 
-    mwrs_ret ret = plat_send_message(client, &handshake);
+    mwrs_ret ret = plat_send_message(client, (mwrs_cl_message *)handshake);
 
     if (ret != MWRS_SUCCESS)
     {
@@ -199,16 +208,16 @@ mwrs_ret plat_start(mwrs_data * client, const char * server_name, int argc, cons
 
   {
     // Receive ack
-    mwrs_sv_message handshake_ack;
-    mwrs_ret ret = plat_receive_message(client, &handshake_ack);
+    mwrs_sv_win_handshake_ack * win_handshake_ack;
+    mwrs_ret ret = plat_receive_message(client, (mwrs_sv_message **)&win_handshake_ack);
 
-    if (ret != MWRS_SUCCESS || handshake_ack.type != MWRS_MSG_SV_WIN_HANDSHAKE_ACK ||
-        handshake_ack.win_handshake_ack.status != MWRS_SUCCESS)
+    if (ret != MWRS_SUCCESS || win_handshake_ack->type != MWRS_MSG_SV_WIN_HANDSHAKE_ACK ||
+        win_handshake_ack->status != MWRS_SUCCESS)
     {
       CloseHandle(client->plat.pipe); // TODO in destructor instead
 
-      if (ret == MWRS_SUCCESS && handshake_ack.type == MWRS_MSG_SV_WIN_HANDSHAKE_ACK)
-        return handshake_ack.win_handshake_ack.status;
+      if (ret == MWRS_SUCCESS && win_handshake_ack->type == MWRS_MSG_SV_WIN_HANDSHAKE_ACK)
+        return win_handshake_ack->status;
       else if (ret != MWRS_SUCCESS)
         return ret;
       else
@@ -226,42 +235,52 @@ void plat_stop(mwrs_data * client)
 }
 // plat_stop
 
-mwrs_ret plat_send_message(mwrs_data * client, const mwrs_cl_message * message)
+mwrs_ret plat_send_message(mwrs_data * client, mwrs_cl_message * message)
 {
   if (client->plat.disconnected)
+  {
+    message_free(message);
     return MWRS_E_BROKEN;
+  }
 
   DWORD written;
-  if (!WriteFile(client->plat.pipe, (const void *)message, sizeof(mwrs_cl_message), &written, NULL))
+  if (!WriteFile(client->plat.pipe, (const void *)message, message->length, &written, NULL))
   {
-    if (GetLastError() == ERROR_BROKEN_PIPE)
+    DWORD err = GetLastError();
+    if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA)
     {
       client->plat.disconnected = true;
+      message_free(message);
       return MWRS_E_BROKEN;
     }
 
     // TODO error
+    message_free(message);
     return MWRS_E_SYSTEM;
   }
 
-  if (written != sizeof(mwrs_cl_message))
+  if (written != message->length)
   {
     // TODO error
     assert(0 && "Invalid write size");
+    message_free(message);
     return MWRS_E_SYSTEM;
   }
 
+  message_free(message);
   return MWRS_SUCCESS;
 }
 // plat_send_message
 
-mwrs_ret plat_receive_message(mwrs_data * client, mwrs_sv_message * message)
+mwrs_ret plat_receive_message(mwrs_data * client, mwrs_sv_message ** message_out)
 {
   if (client->plat.disconnected)
     return MWRS_E_BROKEN;
 
+  mwrs_sv_message message_base;
+
   DWORD read;
-  if (!ReadFile(client->plat.pipe, (void *)message, sizeof(mwrs_sv_message), &read, NULL))
+  if (!ReadFile(client->plat.pipe, (void *)&message_base, sizeof(message_base), &read, NULL))
   {
     if (GetLastError() == ERROR_BROKEN_PIPE)
     {
@@ -280,7 +299,40 @@ mwrs_ret plat_receive_message(mwrs_data * client, mwrs_sv_message * message)
     return MWRS_E_SYSTEM;
   }
 
+  *message_out = (mwrs_sv_message *)message_alloc(message_base.length);
+  std::memcpy(*message_out, &message_base, sizeof(message_base));
+
+  if (!ReadFile(client->plat.pipe, (void*)((char *)*message_out + sizeof(message_base)),
+                message_base.length - sizeof(message_base),
+                &read, NULL))
+  {
+    if (GetLastError() == ERROR_BROKEN_PIPE)
+    {
+      client->plat.disconnected = true;
+      message_free(*message_out);
+      return MWRS_E_BROKEN;
+    }
+
+    // TODO error
+    message_free(*message_out);
+    return MWRS_E_SYSTEM;
+  }
+
+  if (read != message_base.length - sizeof(message_base))
+  {
+    // TODO error
+    assert(0 && "Invalid read size");
+    message_free(*message_out);
+    return MWRS_E_SYSTEM;
+  }
+
   return MWRS_SUCCESS;
+}
+
+
+bool plat_res_is_valid(const mwrs_res * res)
+{
+  return res->opaque != nullptr && res->opaque != INVALID_HANDLE_VALUE;
 }
 
 
@@ -354,11 +406,7 @@ std::unique_ptr<mwrs_data> instance;
 
 // API implementation
 
-int mwrs_res_is_valid(const mwrs_res * res)
-{
-  // TODO opaque is platform dependant, fixme
-  return res->opaque != nullptr && res->opaque != INVALID_HANDLE_VALUE;
-}
+int mwrs_res_is_valid(const mwrs_res * res) { return plat_res_is_valid(res); }
 
 int mwrs_watcher_is_valid(const mwrs_watcher * watcher)
 {
@@ -411,24 +459,33 @@ mwrs_ret mwrs_open(const char * id, mwrs_open_flags flags, mwrs_res * res_out)
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  mwrs_sv_message response;
+  mwrs_sv_message * response;
   ret = receive_response(::instance.get(), &response);
 
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  if (response.type != MWRS_MSG_SV_COMMON_RESPONSE)
-    return MWRS_E_PROTOCOL; // TODO kill client
-
-  if (response.common_response.status == MWRS_SUCCESS)
+  if (response->type != MWRS_MSG_SV_COMMON_RESPONSE)
   {
-    ret = common_response_get_res(&response.common_response, res_out);
-
-    if (ret != MWRS_SUCCESS)
-      return MWRS_E_PROTOCOL; // TODO kill client
+    message_free(response);
+    return MWRS_E_PROTOCOL; // TODO kill client
   }
 
-  return response.common_response.status;
+  mwrs_sv_msg_common_response * common_response = (mwrs_sv_msg_common_response *)response;
+  if (common_response->status == MWRS_SUCCESS)
+  {
+    ret = common_response_get_res(common_response, res_out);
+
+    if (ret != MWRS_SUCCESS)
+    {
+      message_free(response);
+      return MWRS_E_PROTOCOL; // TODO kill client
+    }
+  }
+
+  ret = common_response->status;
+  message_free(response);
+  return ret;
 }
 
 mwrs_ret mwrs_watcher_open(const mwrs_watcher * watcher, mwrs_open_flags flags, mwrs_res * res_out);
@@ -452,27 +509,36 @@ mwrs_ret mwrs_open_watch(const char * id, mwrs_open_flags flags, mwrs_res * res_
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  mwrs_sv_message response;
+  mwrs_sv_message * response;
   ret = receive_response(::instance.get(), &response);
 
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  if (response.type != MWRS_MSG_SV_COMMON_RESPONSE)
-    return MWRS_E_PROTOCOL; // TODO kill client
-
-  if (response.common_response.status == MWRS_SUCCESS)
+  if (response->type != MWRS_MSG_SV_COMMON_RESPONSE)
   {
-    ret = common_response_get_res(&response.common_response, res_out);
+    message_free(response);
+    return MWRS_E_PROTOCOL; // TODO kill client
+  }
+
+  mwrs_sv_msg_common_response * common_response = (mwrs_sv_msg_common_response *)response;
+  if (common_response->status == MWRS_SUCCESS)
+  {
+    ret = common_response_get_res(common_response, res_out);
 
     if (ret != MWRS_SUCCESS)
+    {
+      message_free(response);
       return MWRS_E_PROTOCOL; // TODO kill client
+    }
   }
 
   // Ignore errors
-  common_response_get_watcher(&response.common_response, watcher_out);
+  common_response_get_watcher(common_response, watcher_out);
 
-  return response.common_response.status;
+  ret = common_response->status;
+  message_free(response);
+  return ret;
 }
 
 
@@ -488,24 +554,33 @@ mwrs_ret mwrs_stat(const char * id, mwrs_status * stat_out)
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  mwrs_sv_message response;
+  mwrs_sv_message * response;
   ret = receive_response(::instance.get(), &response);
 
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  if (response.type != MWRS_MSG_SV_COMMON_RESPONSE)
-    return MWRS_E_PROTOCOL; // TODO kill client
-
-  if (response.common_response.status == MWRS_SUCCESS)
+  if (response->type != MWRS_MSG_SV_COMMON_RESPONSE)
   {
-    ret = common_response_get_status(&response.common_response, stat_out);
-
-    if (ret != MWRS_SUCCESS)
-      return MWRS_E_PROTOCOL; // TODO kill client
+    message_free(response);
+    return MWRS_E_PROTOCOL; // TODO kill client
   }
 
-  return response.common_response.status;
+  mwrs_sv_msg_common_response * common_response = (mwrs_sv_msg_common_response *)response;
+  if (common_response->status == MWRS_SUCCESS)
+  {
+    ret = common_response_get_status(common_response, stat_out);
+
+    if (ret != MWRS_SUCCESS)
+    {
+      message_free(response);
+      return MWRS_E_PROTOCOL; // TODO kill client
+    }
+  }
+
+  ret = common_response->status;
+  message_free(response);
+  return ret;
 }
 
 mwrs_ret mwrs_stat_watch(const char * id, mwrs_status * stat_out, mwrs_watcher * watcher_out)
@@ -523,27 +598,36 @@ mwrs_ret mwrs_stat_watch(const char * id, mwrs_status * stat_out, mwrs_watcher *
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  mwrs_sv_message response;
+  mwrs_sv_message * response;
   ret = receive_response(::instance.get(), &response);
 
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  if (response.type != MWRS_MSG_SV_COMMON_RESPONSE)
-    return MWRS_E_PROTOCOL; // TODO kill client
-
-  if (response.common_response.status == MWRS_SUCCESS)
+  if (response->type != MWRS_MSG_SV_COMMON_RESPONSE)
   {
-    ret = common_response_get_status(&response.common_response, stat_out);
+    message_free(response);
+    return MWRS_E_PROTOCOL; // TODO kill client
+  }
+
+  mwrs_sv_msg_common_response * common_response = (mwrs_sv_msg_common_response *)response;
+  if (common_response->status == MWRS_SUCCESS)
+  {
+    ret = common_response_get_status(common_response, stat_out);
 
     if (ret != MWRS_SUCCESS)
+    {
+      message_free(response);
       return MWRS_E_PROTOCOL; // TODO kill client
+    }
   }
 
   // Ignore errors
-  common_response_get_watcher(&response.common_response, watcher_out);
+  common_response_get_watcher(common_response, watcher_out);
 
-  return response.common_response.status;
+  ret = common_response->status;
+  message_free(response);
+  return ret;
 }
 
 
@@ -562,24 +646,33 @@ mwrs_ret mwrs_watch(const char * id, mwrs_watcher * watcher_out)
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  mwrs_sv_message response;
+  mwrs_sv_message * response;
   ret = receive_response(::instance.get(), &response);
 
   if (ret != MWRS_SUCCESS)
     return ret;
 
-  if (response.type != MWRS_MSG_SV_COMMON_RESPONSE)
-    return MWRS_E_PROTOCOL; // TODO kill client
-
-  if (response.common_response.status == MWRS_SUCCESS)
+  if (response->type != MWRS_MSG_SV_COMMON_RESPONSE)
   {
-    ret = common_response_get_watcher(&response.common_response, watcher_out);
-
-    if (ret != MWRS_SUCCESS)
-      return MWRS_E_PROTOCOL; // TODO kill client
+    message_free(response);
+    return MWRS_E_PROTOCOL; // TODO kill client
   }
 
-  return response.common_response.status;
+  mwrs_sv_msg_common_response * common_response = (mwrs_sv_msg_common_response *)response;
+  if (common_response->status == MWRS_SUCCESS)
+  {
+    ret = common_response_get_watcher(common_response, watcher_out);
+
+    if (ret != MWRS_SUCCESS)
+    {
+      message_free(response);
+      return MWRS_E_PROTOCOL; // TODO kill client
+    }
+  }
+
+  ret = common_response->status;
+  message_free(response);
+  return ret;
 }
 
 mwrs_ret mwrs_close_watcher(mwrs_watcher * watcher);

@@ -6,10 +6,11 @@
 
 #define MWRS_INCLUDE_SERVER
 #include "mwrs_messages.hpp"
-#include <mwrs.h>
+#include <mwrs_server.h>
 
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstring>
@@ -71,7 +72,7 @@ class WinClientThread
     ClientHandle(WinClientThread * parent, HANDLE pipe);
     ~ClientHandle();
 
-    void queue_message(const mwrs_sv_message * message);
+    void queue_message(mwrs_sv_message * message);
 
     void tick();
     void close();
@@ -98,8 +99,11 @@ class WinClientThread
     HANDLE pipe = INVALID_HANDLE_VALUE;
     std::mutex mutex;
 
-    mwrs_cl_message read_message{};
-    std::list<mwrs_sv_message> write_queue;
+    mwrs_cl_message read_message_head{};
+    mwrs_cl_message * read_message = nullptr;
+    std::size_t read_offset;
+
+    std::list<mwrs_sv_message *> write_queue;
 
     OVERLAPPED read_overlapped{};
     OVERLAPPED write_overlapped{};
@@ -215,10 +219,15 @@ mwrs_ret plat_server_start(mwrs_server_data * server);
 
 void plat_server_stop(mwrs_server_data * server);
 
-void plat_client_queue_message(mwrs_client_data * client, const mwrs_sv_message * message);
+void plat_client_queue_message(mwrs_client_data * client, mwrs_sv_message * message);
 
 
 // Functions
+
+void * message_alloc(size_t size) { return new char[size]{}; }
+
+void message_free(void* message) { delete[] message; }
+
 
 mwrs_ret server_on_client_connect(mwrs_server_data * server, int argc, const char ** argv,
                                   mwrs_client_data ** client_out)
@@ -285,7 +294,7 @@ mwrs_ret server_on_event(mwrs_server_data * server, const char * id, mwrs_event_
 
 void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message * message)
 {
-  mwrs_sv_message response{};
+  mwrs_sv_message * response = nullptr;
   switch (message->type)
   {
   case MWRS_MSG_CL_OPEN:
@@ -293,13 +302,21 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
   case MWRS_MSG_CL_OPEN_WATCH:
   case MWRS_MSG_CL_STAT:
   case MWRS_MSG_CL_STAT_WATCH:
-    response.type = MWRS_MSG_SV_COMMON_RESPONSE;
+  {
+    mwrs_cl_msg_resource_request * resource_request = (mwrs_cl_msg_resource_request *)message;
+    mwrs_sv_msg_common_response * common_response =
+        (mwrs_sv_msg_common_response *)message_alloc(sizeof(mwrs_sv_msg_common_response));
+    common_response->type = MWRS_MSG_SV_COMMON_RESPONSE;
+    common_response->length = sizeof(mwrs_sv_msg_common_response);
+    response                = (mwrs_sv_message *)common_response;
     // Watch first
     switch (message->type)
     {
     case MWRS_MSG_CL_WATCH:
     case MWRS_MSG_CL_OPEN_WATCH:
-    case MWRS_MSG_CL_STAT_WATCH: break;
+    case MWRS_MSG_CL_STAT_WATCH:
+      // TODO watch
+      break;
     default: break;
     }
     // Open
@@ -309,17 +326,15 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
     case MWRS_MSG_CL_OPEN_WATCH:
     {
       mwrs_sv_res_open res_open{};
-      response.common_response.status =
-          client->server->callbacks.open(&client->client, message->resource_request.resource_id,
-                                         message->resource_request.flags, &res_open);
+      common_response->status =
+          client->server->callbacks.open(&client->client, &resource_request->resource_id, resource_request->flags, &res_open);
 
-      if (response.common_response.status == MWRS_SUCCESS)
+      if (common_response->status == MWRS_SUCCESS)
       {
-        response.common_response.open_flags = message->resource_request.flags;
+        common_response->open_flags = resource_request->flags;
         // TODO platform dependant, fixme
         // Fill file descriptor after open_flags (can be used by res open) TODO use argument?
-        response.common_response.status =
-            fill_win_handle_from_res_open(client, &res_open, &response.common_response);
+        common_response->status = fill_win_handle_from_res_open(client, &res_open, common_response);
       }
     }
     default: break;
@@ -331,14 +346,14 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
     case MWRS_MSG_CL_STAT_WATCH:
     {
       mwrs_status res_stat{};
-      response.common_response.status = client->server->callbacks.stat(
-          &client->client, message->resource_request.resource_id, &res_stat);
+      common_response->status = client->server->callbacks.stat(
+          &client->client, &resource_request->resource_id, &res_stat);
       break;
     }
     default: break;
     }
     break;
-
+  }
   case MWRS_MSG_CL_WATCHER_OPEN:
   case MWRS_MSG_CL_CLOSE_WATCHER: break;
 
@@ -347,7 +362,10 @@ void client_on_receive_message(mwrs_client_data * client, const mwrs_cl_message 
     assert(0 && "Invalid message type");
   }
 
-  plat_client_queue_message(client, &response);
+  if (response)
+    plat_client_queue_message(client, response);
+  else
+    assert(0 && "No response to client message");
 }
 // client_on_receive_message
 
@@ -380,6 +398,19 @@ WinClientThread::ClientHandle::~ClientHandle()
 
   CancelIo(pipe);
   CloseHandle(pipe);
+
+  // Clear messages
+  while (!write_queue.empty())
+  {
+    message_free(write_queue.front());
+    write_queue.pop_front();
+  }
+
+  if (read_message)
+  {
+    message_free(read_message);
+    read_message = nullptr;
+  }
 }
 
 
@@ -393,11 +424,11 @@ void WinClientThread::ClientHandle::close()
 }
 
 
-void WinClientThread::ClientHandle::queue_message(const mwrs_sv_message * message)
+void WinClientThread::ClientHandle::queue_message(mwrs_sv_message * message)
 {
   {
     std::unique_lock<std::mutex> lock(mutex);
-    write_queue.push_back(*message);
+    write_queue.push_back(message);
   }
   SetEvent(parent->wake_event);
 }
@@ -412,15 +443,28 @@ void WinClientThread::ClientHandle::tick()
   {
     if (!reading)
     {
-      ZeroMemory(&read_message, sizeof(read_message));
       ZeroMemory(&read_overlapped, sizeof(read_overlapped));
       read_overlapped.hEvent = read_event;
 
       DWORD err = ERROR_SUCCESS;
 
       DWORD read_len;
-      if (ReadFile(pipe, &read_message, sizeof(read_message), &read_len, &read_overlapped) == 0)
-        err = GetLastError();
+
+      if (!read_message)
+      {
+        // Read message head
+        ZeroMemory(&read_message_head, sizeof(read_message_head));
+        if (ReadFile(pipe, &read_message_head, sizeof(read_message_head), &read_len,
+                     &read_overlapped) == 0)
+          err = GetLastError();
+      }
+      else
+      {
+        // Read message body
+        if (ReadFile(pipe, (void*)((char*)read_message + read_offset), read_message_head.length - read_offset,
+                     &read_len, &read_overlapped) == 0)
+          err = GetLastError();
+      }
 
       if (err == ERROR_IO_PENDING)
       {
@@ -449,12 +493,12 @@ void WinClientThread::ClientHandle::tick()
       ZeroMemory(&write_overlapped, sizeof(write_overlapped));
       write_overlapped.hEvent = write_event;
 
-      mwrs_sv_message & send_message = write_queue.front();
+      mwrs_sv_message * send_message = write_queue.front();
 
       DWORD err = ERROR_SUCCESS;
 
       DWORD write_len;
-      if (WriteFile(pipe, &send_message, sizeof(send_message), &write_len, &write_overlapped) == 0)
+      if (WriteFile(pipe, send_message, send_message->length, &write_len, &write_overlapped) == 0)
         err = GetLastError();
 
       if (err == ERROR_IO_PENDING)
@@ -468,6 +512,7 @@ void WinClientThread::ClientHandle::tick()
           std::unique_lock<std::mutex> lock(mutex);
           write_queue.pop_front();
         }
+        message_free(send_message);
         ResetEvent(write_event);
         continue;
       }
@@ -533,11 +578,13 @@ void WinClientThread::ClientHandle::write_completed()
     assert(0 && "Async write error");
   }
 
+  mwrs_sv_message * message = write_queue.front();
   {
     // Pop sent message
     std::unique_lock<std::mutex> lock(mutex);
     write_queue.pop_front();
   }
+  message_free(message);
 
   writing = false;
   ResetEvent(write_event);
@@ -547,27 +594,50 @@ void WinClientThread::ClientHandle::write_completed()
 
 void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
 {
-  if (readlen != sizeof(mwrs_cl_message))
+  if (!read_message)
   {
-    // TODO receive error
-    assert(0 && "Receive error");
+    // Message head
+    if (readlen != sizeof(mwrs_cl_message))
+    {
+      // TODO receive error
+      assert(0 && "Receive error");
+    }
+
+    read_message = (mwrs_cl_message *)message_alloc(read_message_head.length);
+    std::memcpy(read_message, &read_message_head, sizeof(read_message));
+    read_offset = sizeof(read_message);
+    return;
   }
 
-  switch (read_message.type)
+  // Message body
+  read_offset += readlen;
+  if (read_offset < read_message_head.length)
+  {
+    // Read is not complete
+    return;
+  }
+
+  // Message is complete
+  assert(read_offset == read_message_head.length);
+
+  switch (read_message->type)
   {
   case MWRS_MSG_CL_WIN_HANDSHAKE:
     if (!client)
     {
-      mwrs_sv_message handshake_ack;
-      handshake_ack.type = MWRS_MSG_SV_WIN_HANDSHAKE_ACK;
+      mwrs_cl_win_handshake * win_handshake = (mwrs_cl_win_handshake *)read_message;
+      mwrs_sv_win_handshake_ack * handshake_ack =
+          (mwrs_sv_win_handshake_ack *)message_alloc(sizeof(mwrs_sv_win_handshake_ack));
+      handshake_ack->type = MWRS_MSG_SV_WIN_HANDSHAKE_ACK;
+      handshake_ack->length = sizeof(mwrs_sv_win_handshake_ack);
 
-      if (read_message.win_handshake.mwrs_version != MWRS_VERSION)
+      if (win_handshake->mwrs_version != MWRS_VERSION)
       {
-        handshake_ack.win_handshake_ack.status = MWRS_E_NOTSUPPORTED;
+        handshake_ack->status = MWRS_E_NOTSUPPORTED;
       }
       else
       {
-        DWORD process_id = read_message.win_handshake.process_id;
+        DWORD process_id = win_handshake->process_id;
         process          = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process_id);
 
         // Documentation says NULL
@@ -577,14 +647,14 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
           assert(0 && "Failed to open client process");
         }
 
-        const char * argv_ptr[128]{0}; // TODO hardcoded here?
-        int argc    = read_message.win_handshake.argc;
-        char * argv = read_message.win_handshake.argv;
+        std::array<const char *, 128> argv_ptr{}; // TODO hardcoded
+        int argc    = win_handshake->argc;
+        char * argv = &win_handshake->argv;
 
-        if (argc > 128)
+        if (argc > argv_ptr.size())
         {
           // TODO warning
-          argc = 128;
+          argc = argv_ptr.size();
         }
 
         for (int i = 0; i < argc; ++i)
@@ -593,8 +663,7 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
           argv += std::strlen(argv) + 1;
         }
 
-        // TODO args
-        mwrs_ret ret = server_on_client_connect(parent->server, argc, argv_ptr, &client);
+        mwrs_ret ret = server_on_client_connect(parent->server, argc, argv_ptr.data(), &client);
 
         if (ret == MWRS_SUCCESS)
         {
@@ -606,10 +675,10 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
           assert(0 && "Client creation error");
         }
 
-        handshake_ack.win_handshake_ack.status = ret;
+        handshake_ack->status = ret;
       }
 
-      queue_message(&handshake_ack);
+      queue_message((mwrs_sv_message *)handshake_ack);
     }
     else
     {
@@ -621,7 +690,7 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
   default:
     if (client)
     {
-      client_on_receive_message(client, &read_message);
+      client_on_receive_message(client, read_message);
     }
     else
     {
@@ -629,6 +698,9 @@ void WinClientThread::ClientHandle::on_read(mwrs_size readlen)
       assert(0 && "Must perform handshake first");
     }
   } // switch message type
+
+  message_free(read_message);
+  read_message = nullptr;
 }
 // Client on_read
 
@@ -788,7 +860,7 @@ void WinAcceptThread::run()
   {
     HANDLE pipe = CreateNamedPipe(
         pipename, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
         PIPE_UNLIMITED_INSTANCES, pipeBufferSize, pipeBufferSize, 0, NULL);
 
     if (pipe == INVALID_HANDLE_VALUE)
@@ -968,7 +1040,7 @@ void plat_server_stop(mwrs_server_data * server)
 // plat_server_stop
 
 
-void plat_client_queue_message(mwrs_client_data * client, const mwrs_sv_message * message)
+void plat_client_queue_message(mwrs_client_data * client, mwrs_sv_message * message)
 {
   client->plat.handle->queue_message(message);
 }

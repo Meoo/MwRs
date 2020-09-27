@@ -1,6 +1,5 @@
 
-#define MWRS_INCLUDE_SERVER
-#include <mwrs.h>
+#include <mwrs_server.h>
 
 #include <atomic>
 #include <cassert>

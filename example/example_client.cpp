@@ -1,5 +1,5 @@
 
-#include <mwrs.h>
+#include <mwrs_client.h>
 
 #include <cassert>
 #include <cstdio>
@@ -23,14 +23,14 @@ int main(int argc, char ** argv)
   printf("Client init OK\n");
 
   mwrs_res res{};
-  mwrs_ret ret = mwrs_open("C:/Test.txt", MWRS_OPEN_READ, &res);
+  mwrs_ret ret = mwrs_open("C:/Work/Test.txt", MWRS_OPEN_READ, &res);
 
   if (ret == MWRS_SUCCESS)
   {
     printf("Open OK\n");
 
-    char buf[128]{};
-    mwrs_size sz = 128;
+    char buf[256]{};
+    mwrs_size sz = sizeof(buf);
     if (mwrs_read(&res, buf, &sz) == MWRS_SUCCESS)
       printf("Data: %s\n", buf);
   }
@@ -40,10 +40,10 @@ int main(int argc, char ** argv)
   mwrs_close(&res);
 
   printf("Begin open loop\n");
-  for (int i = 0; i < 100; ++i)
+  for (int i = 0; i < 100000; ++i)
   {
     mwrs_res r{};
-    ret = mwrs_open("C:/Test.txt", MWRS_OPEN_READ, &r);
+    ret = mwrs_open("C:/Work/Test.txt", MWRS_OPEN_READ, &r);
     if (ret != MWRS_SUCCESS)
       printf("Open error %d\n", ret);
     mwrs_close(&r);

@@ -37,6 +37,7 @@ endif()
 
 set(CLIENT_SOURCE
   include/mwrs.h
+  include/mwrs_client.h
   src/mwrs_client.cpp
   src/mwrs_messages.hpp)
 
@@ -55,6 +56,7 @@ set_target_properties(client PROPERTIES
 
 set(SERVER_SOURCE
   include/mwrs.h
+  include/mwrs_server.h
   src/mwrs_server.cpp
   src/mwrs_messages.hpp)
 
@@ -86,7 +88,11 @@ if(MWRS_INSTALL)
 
   set(MWRS_CMAKE_GENERATED "*/")
   configure_file(include/mwrs.h ${CMAKE_CURRENT_BINARY_DIR}/mwrs.h)
-  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/mwrs.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/mwrs.h
+    include/mwrs_client.h
+    include/mwrs_server.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
   set(MWRS_CMAKE_DIR "cmake")
 
@@ -98,10 +104,12 @@ if(MWRS_INSTALL)
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
 
-  install(
-    FILES $<TARGET_PDB_FILE:client> $<TARGET_PDB_FILE:server>
-    DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL
-  )
+  if(BUILD_SHARED_LIBS)
+    install(
+      FILES $<TARGET_PDB_FILE:client> $<TARGET_PDB_FILE:server>
+      DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL
+    )
+  endif()
 
   install(EXPORT MwRs
     FILE mwrsConfig.cmake

@@ -3,5 +3,9 @@
 * Errors, warn / error callbacks
 * Events
 * Watchers
+* Move
+* Remove
+* Something like ioctls
+* argc/argv
 
 * Pipe util for server
